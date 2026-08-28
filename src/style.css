@@ -19,6 +19,14 @@ headerbar {
   padding: 8px 10px;
 }
 
+.columns {
+  background: #101b21;
+}
+
+.directory-column {
+  border-right: 1px solid alpha(#8bc9eb, 0.14);
+}
+
 .column-header {
   color: #8bc9eb;
   font-weight: 700;
@@ -29,6 +37,10 @@ headerbar {
   border-radius: 6px;
   margin: 1px 8px;
   padding: 4px;
+}
+
+.file-list row:hover {
+  background: alpha(#304860, 0.45);
 }
 
 .file-list row:selected {
