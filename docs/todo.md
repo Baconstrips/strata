@@ -19,28 +19,28 @@ Legend: **P0** blocks the milestone, **P1** is required for its exit criteria, *
 ### Product and engineering baseline
 
 - [x] Add PRD, roadmap, work breakdown, and architecture principles
-- [ ] **P0** Create deterministic fixture generator for 1k, 10k, and 100k entries
+- [x] **P0** Create deterministic fixture generator for 1k, 10k, and 100k entries
 - [ ] **P0** Record startup, first-render, navigation, and large-directory baselines
-- [ ] **P0** Add structured logging with request IDs and timings
+- [x] **P0** Add structured logging with request IDs and timings
 - [ ] **P1** Add contributor development commands and pre-commit guidance
 - [ ] **P1** Add issue and pull-request templates
 
 ### Models and state
 
-- [ ] **P0** Introduce native-path-safe `Location` and `FileEntry` models
+- [x] **P0** Introduce native-path-safe `Location` and `FileEntry` models
 - [ ] **P0** Model committed `NavigationPath` separately from temporary `PeekState`
 - [ ] **P0** Add explicit active-column, focus, and selection state
 - [ ] **P0** Add navigation commands and reducer/controller tests
-- [ ] **P1** Add typed loading, empty, unavailable, and error states
-- [ ] **P1** Define metadata states so unknown is not confused with zero/empty
+- [x] **P1** Add typed loading, empty, unavailable, and error states
+- [x] **P1** Define metadata states so unknown is not confused with zero/empty
 
 ### Boundaries
 
-- [ ] **P0** Move direct enumeration out of UI widgets into a file-source service
-- [ ] **P0** Define cancellable, generation-aware request handling
-- [ ] **P0** Define bounded batch delivery and stale-result rejection
+- [x] **P0** Move direct enumeration out of UI widgets into a file-source service
+- [x] **P0** Define cancellable, generation-aware request handling
+- [x] **P0** Define bounded batch delivery and stale-result rejection
 - [ ] **P1** Establish operation, search, preview, theme, and settings capability types
-- [ ] **P1** Introduce dependency composition at application startup
+- [x] **P1** Introduce dependency composition at application startup
 - [ ] **P2** Add initial ADRs only for decisions that cannot remain reversible
 
 ### Design system
