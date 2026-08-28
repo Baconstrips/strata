@@ -1,4 +1,6 @@
-# Native Linux File Manager — MVP and Technical Direction
+# Strata — Initial Technical Direction
+
+> This early technical assessment is retained as background. The [PRD](prd.md) is the product North Star, while the [roadmap](roadmap.md) and [work breakdown](todo.md) track delivery.
 
 ## Product vision
 
