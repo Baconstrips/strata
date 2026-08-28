@@ -4,6 +4,12 @@
 
 Strata is an experimental, keyboard-first file manager for Linux. It is designed primarily for Omarchy while remaining portable to other modern Linux environments.
 
+## North Star
+
+![Strata design North Star showing Miller-column navigation, the places sidebar, and a Markdown preview](docs/assets/strata-north-star.png)
+
+> This is the original product concept, not a screenshot of the current build. It guides Strata's navigation, information density, theming, and preview experience.
+
 ## Vision
 
 - Miller-column navigation
