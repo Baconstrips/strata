@@ -1,0 +1,41 @@
+window {
+  background: #101b21;
+  color: #d6e2ee;
+}
+
+headerbar {
+  background: #101b21;
+  border-bottom: 1px solid alpha(#8bc9eb, 0.16);
+  box-shadow: none;
+}
+
+.sidebar {
+  background: #0b1216;
+  border-right: 1px solid alpha(#8bc9eb, 0.14);
+  padding: 12px;
+}
+
+.sidebar button {
+  padding: 8px 10px;
+}
+
+.column-header {
+  color: #8bc9eb;
+  font-weight: 700;
+  padding: 8px 12px;
+}
+
+.file-list row {
+  border-radius: 6px;
+  margin: 1px 8px;
+  padding: 4px;
+}
+
+.file-list row:selected {
+  background: #243d56;
+}
+
+.empty-state {
+  color: #4d86b0;
+  font-size: 1.1em;
+}
