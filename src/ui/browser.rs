@@ -206,10 +206,15 @@ impl ViewState {
         });
 
         let adjustment = self.scroller.hadjustment();
+        let completed_adjustment = adjustment.clone();
+        revealer.connect_child_revealed_notify(move |revealer| {
+            if revealer.is_child_revealed() {
+                scroll_to_end(&completed_adjustment);
+            }
+        });
         glib::idle_add_local_once(move || {
             revealer.set_reveal_child(true);
-            let end = (adjustment.upper() - adjustment.page_size()).max(adjustment.lower());
-            adjustment.set_value(end);
+            scroll_to_end(&adjustment);
         });
     }
 
@@ -221,6 +226,11 @@ impl ViewState {
             }
         }
     }
+}
+
+fn scroll_to_end(adjustment: &gtk::Adjustment) {
+    let end = (adjustment.upper() - adjustment.page_size()).max(adjustment.lower());
+    adjustment.set_value(end);
 }
 
 fn open_file(path: &Path) {

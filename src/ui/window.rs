@@ -19,6 +19,9 @@ pub fn present(application: &gtk::Application) {
         .default_height(760)
         .build();
 
+    let browser = BrowserView::new(Rc::new(LocalFileSource));
+    let controller = browser.browser();
+
     let title = gtk::Label::new(Some("Strata"));
     title.add_css_class("title");
     let header = gtk::HeaderBar::builder().title_widget(&title).build();
@@ -28,7 +31,41 @@ pub fn present(application: &gtk::Application) {
         .build();
     header.pack_end(&search_button);
 
-    let browser = BrowserView::new(Rc::new(LocalFileSource));
+    let back = navigation_button("go-previous-symbolic", "Back");
+    let weak_controller = Rc::downgrade(&controller);
+    back.connect_clicked(move |_| {
+        if let Some(controller) = weak_controller.upgrade() {
+            controller.back();
+        }
+    });
+    header.pack_start(&back);
+
+    let forward = navigation_button("go-next-symbolic", "Forward");
+    let weak_controller = Rc::downgrade(&controller);
+    forward.connect_clicked(move |_| {
+        if let Some(controller) = weak_controller.upgrade() {
+            controller.forward();
+        }
+    });
+    header.pack_start(&forward);
+
+    let parent = navigation_button("go-up-symbolic", "Parent directory");
+    let weak_controller = Rc::downgrade(&controller);
+    parent.connect_clicked(move |_| {
+        if let Some(controller) = weak_controller.upgrade() {
+            controller.parent();
+        }
+    });
+    header.pack_start(&parent);
+
+    let home = navigation_button(crate::assets::icons::HOME, "Home");
+    let weak_controller = Rc::downgrade(&controller);
+    home.connect_clicked(move |_| {
+        if let Some(controller) = weak_controller.upgrade() {
+            controller.navigate(Location::local(home_directory()));
+        }
+    });
+    header.pack_start(&home);
     let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
     root.append(&header);
 
@@ -48,6 +85,13 @@ pub fn present(application: &gtk::Application) {
     let browser_controller = browser.browser();
     window.connect_destroy(move |_| browser_controller.clear_observer());
     window.present();
+}
+
+fn navigation_button(icon: &str, tooltip: &str) -> gtk::Button {
+    gtk::Button::builder()
+        .icon_name(icon)
+        .tooltip_text(tooltip)
+        .build()
 }
 
 fn build_sidebar(browser: &Rc<Browser>) -> gtk::Widget {

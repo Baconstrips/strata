@@ -6,7 +6,7 @@ use std::{
 };
 
 use crate::{
-    app::navigation::NavigationState,
+    app::navigation::{NavigationPath, NavigationState},
     model::{FileEntry, Location},
     services::{DirectoryEvent, DirectoryRequest, FileSource, LoadHandle, RequestId},
 };
@@ -66,7 +66,9 @@ impl Browser {
     pub fn navigate(self: &Rc<Self>, location: Location) {
         self.loads.borrow_mut().clear();
         let request_id = self.new_request_id();
-        self.state.borrow_mut().reset(location.clone(), request_id);
+        self.state
+            .borrow_mut()
+            .navigate(location.clone(), request_id);
         self.emit(BrowserEvent::Reset);
         self.emit(BrowserEvent::ColumnAdded {
             depth: 0,
@@ -95,8 +97,54 @@ impl Browser {
         self.start_load(location, request_id);
     }
 
+    pub fn back(self: &Rc<Self>) {
+        let target = self.state.borrow_mut().go_back();
+        if let Some(target) = target {
+            self.restore_path(target);
+        }
+    }
+
+    pub fn forward(self: &Rc<Self>) {
+        let target = self.state.borrow_mut().go_forward();
+        if let Some(target) = target {
+            self.restore_path(target);
+        }
+    }
+
+    pub fn parent(self: &Rc<Self>) {
+        let target = self.state.borrow_mut().go_parent();
+        if let Some(target) = target {
+            self.restore_path(target);
+        }
+    }
+
     pub fn select(&self, depth: usize, position: usize) {
         let _changed = self.state.borrow_mut().select(depth, position);
+    }
+
+    fn restore_path(self: &Rc<Self>, path: NavigationPath) {
+        self.loads.borrow_mut().clear();
+        let loads: Vec<_> = path
+            .locations()
+            .iter()
+            .cloned()
+            .map(|location| {
+                let request_id = self.new_request_id();
+                (location, request_id)
+            })
+            .collect();
+        self.state
+            .borrow_mut()
+            .restore(path, loads.iter().map(|(_, request_id)| *request_id));
+
+        self.emit(BrowserEvent::Reset);
+        for (depth, (location, request_id)) in loads.into_iter().enumerate() {
+            self.emit(BrowserEvent::ColumnAdded {
+                depth,
+                location: location.clone(),
+            });
+            self.start_load(location, request_id);
+        }
     }
 
     fn start_load(self: &Rc<Self>, location: Location, request_id: RequestId) {
@@ -167,59 +215,4 @@ impl Browser {
 }
 
 #[cfg(test)]
-mod tests {
-    use std::ffi::OsString;
-
-    use super::*;
-    use crate::{
-        model::{EntryKind, MetadataValue},
-        services::LoadHandle,
-    };
-
-    struct FakeFileSource;
-
-    impl FileSource for FakeFileSource {
-        fn enumerate(
-            &self,
-            request: DirectoryRequest,
-            emit: Rc<dyn Fn(DirectoryEvent)>,
-        ) -> LoadHandle {
-            emit(DirectoryEvent::Batch {
-                request_id: request.id,
-                entries: vec![FileEntry {
-                    location: Location::local("/fixture/child"),
-                    native_name: OsString::from("child"),
-                    display_name: "child".into(),
-                    kind: EntryKind::Directory,
-                    size: MetadataValue::Unknown,
-                    modified_unix_seconds: MetadataValue::Unknown,
-                }],
-            });
-            emit(DirectoryEvent::Finished {
-                request_id: request.id,
-            });
-            LoadHandle::new(|| {})
-        }
-    }
-
-    #[test]
-    fn file_source_can_be_replaced_without_constructing_the_ui() {
-        let browser = Browser::new(Rc::new(FakeFileSource));
-        let events = Rc::new(RefCell::new(Vec::new()));
-        let observed = events.clone();
-        browser.observe(move |event| observed.borrow_mut().push(event));
-
-        browser.navigate(Location::local("/fixture"));
-
-        assert!(events.borrow().iter().any(|event| matches!(
-            event,
-            BrowserEvent::EntriesAdded { entries, .. } if entries.len() == 1
-        )));
-        assert!(
-            events
-                .borrow()
-                .iter()
-                .any(|event| matches!(event, BrowserEvent::LoadFinished { .. }))
-        );
-    }
-}
+mod tests;

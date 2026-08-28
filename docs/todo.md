@@ -30,7 +30,7 @@ Legend: **P0** blocks the milestone, **P1** is required for its exit criteria, *
 - [x] **P0** Introduce native-path-safe `Location` and `FileEntry` models
 - [ ] **P0** Model committed `NavigationPath` separately from temporary `PeekState`
 - [ ] **P0** Add explicit active-column, focus, and selection state
-- [ ] **P0** Add navigation commands and reducer/controller tests
+- [x] **P0** Add navigation commands and reducer/controller tests
 - [x] **P1** Add typed loading, empty, unavailable, and error states
 - [x] **P1** Define metadata states so unknown is not confused with zero/empty
 
@@ -58,13 +58,14 @@ Legend: **P0** blocks the milestone, **P1** is required for its exit criteria, *
 
 ### Miller columns
 
-- [ ] **P0** Render columns from `NavigationPath` rather than constructing them ad hoc
-- [ ] **P0** Replace deeper columns when a sibling path is committed
-- [ ] **P0** Keep the active column visible during horizontal overflow
+- [x] **P0** Render columns from `NavigationPath` rather than constructing them ad hoc
+- [x] **P0** Replace deeper columns when a sibling path is committed
+- [x] **P0** Allow committed columns to stack without a fixed depth limit
+- [x] **P0** Keep the newest active column visible by scrolling to the end during horizontal overflow
 - [ ] **P0** Preserve selection per committed column
 - [ ] **P1** Make entry/exit animations interruptible
 - [ ] **P1** Add loading skeleton and directory error state
-- [ ] **P1** Cancel enumeration when a column is removed
+- [x] **P1** Cancel enumeration when a column is removed
 
 ### Hover peeking
 
@@ -79,7 +80,7 @@ Legend: **P0** blocks the milestone, **P1** is required for its exit criteria, *
 
 ### Navigation controls
 
-- [ ] **P0** Back, forward, parent, and home commands
+- [x] **P0** Back, forward, parent, and home commands
 - [ ] **P0** Editable location entry with validation and error feedback
 - [ ] **P1** Breadcrumb/path display
 - [ ] **P1** Reveal and focus the active location after navigation

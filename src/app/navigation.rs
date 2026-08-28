@@ -22,15 +22,47 @@ pub struct ColumnState {
     request_id: RequestId,
 }
 
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct NavigationPath {
+    locations: Vec<Location>,
+}
+
+impl NavigationPath {
+    pub fn from_locations(locations: Vec<Location>) -> Self {
+        Self { locations }
+    }
+
+    pub fn locations(&self) -> &[Location] {
+        &self.locations
+    }
+
+    fn parent(&self) -> Option<Self> {
+        if self.locations.len() > 1 {
+            let mut locations = self.locations.clone();
+            locations.pop();
+            return Some(Self { locations });
+        }
+
+        let current = self.locations.first()?;
+        let parent = current.path().parent()?;
+        if parent == current.path() {
+            return None;
+        }
+        Some(Self::from_locations(vec![Location::local(parent)]))
+    }
+}
+
 #[derive(Default)]
 pub struct NavigationState {
     pub columns: Vec<ColumnState>,
+    back_history: Vec<NavigationPath>,
+    forward_history: Vec<NavigationPath>,
 }
 
 impl NavigationState {
-    pub fn reset(&mut self, location: Location, request_id: RequestId) {
-        self.columns.clear();
-        self.push_column(location, request_id);
+    pub fn navigate(&mut self, location: Location, request_id: RequestId) {
+        self.record_navigation();
+        self.restore(NavigationPath::from_locations(vec![location]), [request_id]);
     }
 
     pub fn descend(
@@ -43,9 +75,69 @@ impl NavigationState {
             return false;
         }
 
+        self.record_navigation();
         self.columns.truncate(parent_depth + 1);
         self.push_column(location, request_id);
         true
+    }
+
+    pub fn go_back(&mut self) -> Option<NavigationPath> {
+        let target = self.back_history.pop()?;
+        if let Some(current) = self.current_path() {
+            self.forward_history.push(current);
+        }
+        Some(target)
+    }
+
+    pub fn go_forward(&mut self) -> Option<NavigationPath> {
+        let target = self.forward_history.pop()?;
+        if let Some(current) = self.current_path() {
+            self.back_history.push(current);
+        }
+        Some(target)
+    }
+
+    pub fn go_parent(&mut self) -> Option<NavigationPath> {
+        let target = self.current_path()?.parent()?;
+        self.record_navigation();
+        Some(target)
+    }
+
+    pub fn restore(
+        &mut self,
+        path: NavigationPath,
+        request_ids: impl IntoIterator<Item = RequestId>,
+    ) {
+        self.columns = path
+            .locations
+            .into_iter()
+            .zip(request_ids)
+            .map(|(location, request_id)| ColumnState {
+                location,
+                entries: Vec::new(),
+                selected: None,
+                load_state: LoadState::Loading,
+                request_id,
+            })
+            .collect();
+    }
+
+    fn current_path(&self) -> Option<NavigationPath> {
+        (!self.columns.is_empty()).then(|| {
+            NavigationPath::from_locations(
+                self.columns
+                    .iter()
+                    .map(|column| column.location.clone())
+                    .collect(),
+            )
+        })
+    }
+
+    fn record_navigation(&mut self) {
+        if let Some(current) = self.current_path() {
+            self.back_history.push(current);
+            self.forward_history.clear();
+        }
     }
 
     fn push_column(&mut self, location: Location, request_id: RequestId) {
@@ -103,60 +195,4 @@ impl NavigationState {
 }
 
 #[cfg(test)]
-mod tests {
-    use std::ffi::OsString;
-
-    use super::*;
-    use crate::model::{EntryKind, MetadataValue};
-
-    fn location(path: &str) -> Location {
-        Location::local(path)
-    }
-
-    fn entry(path: &str) -> FileEntry {
-        FileEntry {
-            location: location(path),
-            native_name: OsString::from("child"),
-            display_name: "child".into(),
-            kind: EntryKind::Directory,
-            size: MetadataValue::Unknown,
-            modified_unix_seconds: MetadataValue::Unknown,
-        }
-    }
-
-    #[test]
-    fn selecting_a_sibling_replaces_deeper_columns() {
-        let mut state = NavigationState::default();
-        state.reset(location("/home"), RequestId(1));
-        assert!(state.descend(0, location("/home/one"), RequestId(2)));
-        assert!(state.descend(1, location("/home/one/deep"), RequestId(3)));
-
-        assert!(state.descend(0, location("/home/two"), RequestId(4)));
-
-        assert_eq!(state.columns.len(), 2);
-        assert_eq!(state.columns[1].location, location("/home/two"));
-    }
-
-    #[test]
-    fn stale_batches_are_rejected() {
-        let mut state = NavigationState::default();
-        state.reset(location("/home"), RequestId(1));
-        state.reset(location("/tmp"), RequestId(2));
-
-        assert_eq!(
-            state.apply_batch(RequestId(1), &[entry("/home/child")]),
-            None
-        );
-        assert!(state.columns[0].entries.is_empty());
-    }
-
-    #[test]
-    fn empty_is_distinct_from_loading_and_error() {
-        let mut state = NavigationState::default();
-        state.reset(location("/empty"), RequestId(1));
-        assert_eq!(state.columns[0].load_state, LoadState::Loading);
-
-        assert_eq!(state.finish(RequestId(1)), Some(0));
-        assert_eq!(state.columns[0].load_state, LoadState::Empty);
-    }
-}
+mod tests;
