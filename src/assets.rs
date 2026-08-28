@@ -56,29 +56,37 @@ fn write_if_changed(path: &Path, contents: &[u8]) -> io::Result<()> {
     Ok(())
 }
 
-#[allow(unsafe_code)]
+#[expect(
+    unsafe_code,
+    reason = "Fontconfig exposes application-font registration only through its C FFI"
+)]
 fn register_application_fonts(
     paths: impl IntoIterator<Item = PathBuf>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // SAFETY: Font registration happens during single-threaded startup, before GTK/Pango
-    // creates a font map. Fontconfig owns the current config; each C string lives through
-    // its call, and Fontconfig copies the path rather than retaining the pointer.
-    unsafe {
-        let config = fontconfig_sys::FcConfigGetCurrent();
-        if config.is_null() {
-            return Err("Fontconfig did not provide a current configuration".into());
-        }
+    // SAFETY: This no-argument Fontconfig call returns a borrowed process-global
+    // configuration. We check it for null before passing it to any other FFI call.
+    let config = unsafe { fontconfig_sys::FcConfigGetCurrent() };
+    if config.is_null() {
+        return Err("Fontconfig did not provide a current configuration".into());
+    }
 
-        for path in paths {
-            let path = CString::new(path.as_os_str().as_bytes())?;
-            if fontconfig_sys::FcConfigAppFontAddFile(config, path.as_ptr().cast()) == 0 {
-                return Err("Fontconfig could not register a bundled font".into());
-            }
-        }
+    for path in paths {
+        let path = CString::new(path.as_os_str().as_bytes())?;
 
-        if fontconfig_sys::FcConfigBuildFonts(config) == 0 {
-            return Err("Fontconfig could not rebuild the application font set".into());
+        // SAFETY: `config` was checked above. `path` is a valid, NUL-terminated C string
+        // that remains alive for the call, and Fontconfig copies rather than retains it.
+        let registered =
+            unsafe { fontconfig_sys::FcConfigAppFontAddFile(config, path.as_ptr().cast()) };
+        if registered == 0 {
+            return Err("Fontconfig could not register a bundled font".into());
         }
+    }
+
+    // SAFETY: `config` is the same checked process-global configuration. Registration
+    // runs during single-threaded startup before GTK/Pango creates the application's map.
+    let rebuilt = unsafe { fontconfig_sys::FcConfigBuildFonts(config) };
+    if rebuilt == 0 {
+        return Err("Fontconfig could not rebuild the application font set".into());
     }
 
     Ok(())

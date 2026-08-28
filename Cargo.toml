@@ -18,10 +18,17 @@ glib-build-tools = "0.21.0"
 
 [lints.rust]
 unsafe_code = "deny"
+unsafe_op_in_unsafe_fn = "deny"
 unused_must_use = "deny"
+unused_unsafe = "deny"
 
 [lints.clippy]
+allow_attributes = "deny"
+allow_attributes_without_reason = "deny"
 dbg_macro = "deny"
+missing_safety_doc = "deny"
+multiple_unsafe_ops_per_block = "deny"
 todo = "warn"
+undocumented_unsafe_blocks = "deny"
 unimplemented = "warn"
 unwrap_used = "warn"

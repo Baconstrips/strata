@@ -55,7 +55,7 @@ cargo install --locked typos-cli
 - Add an abstraction only for real variation, isolation, or testability.
 - Add focused tests for state transitions and filesystem edge cases.
 - Avoid `unwrap`, `todo!`, `unimplemented!`, and debug macros in committed code.
-- Document non-obvious unsafe code with an explicit safety argument.
+- Follow the [unsafe code policy](docs/unsafe-code.md); never use `#[allow(unsafe_code)]`.
 - Preserve licensing and attribution for every new asset and dependency.
 
 See the [architecture principles](docs/architecture.md), [PRD](docs/prd.md), and [work breakdown](docs/todo.md) before making structural changes.
