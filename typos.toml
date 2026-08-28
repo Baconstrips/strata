@@ -1,0 +1,13 @@
+[files]
+extend-exclude = [
+  "data/fonts/**",
+  "data/icons/**",
+  "data/licenses/**",
+  "Cargo.lock",
+]
+
+[default.extend-words]
+Omarchy = "Omarchy"
+Hyprland = "Hyprland"
+JetBrains = "JetBrains"
+Strata = "Strata"

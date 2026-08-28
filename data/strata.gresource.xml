@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gresources>
+  <gresource prefix="/io/github/lgse/Strata">
+    <file>icons/scalable/actions/strata-download-symbolic.svg</file>
+    <file>icons/scalable/actions/strata-file-text-symbolic.svg</file>
+    <file>icons/scalable/actions/strata-house-symbolic.svg</file>
+    <file>icons/scalable/actions/strata-image-symbolic.svg</file>
+    <file>icons/scalable/actions/strata-search-symbolic.svg</file>
+    <file>icons/scalable/actions/strata-video-symbolic.svg</file>
+  </gresource>
+</gresources>

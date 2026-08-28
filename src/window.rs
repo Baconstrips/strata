@@ -16,6 +16,7 @@ struct FileEntry {
 }
 
 pub fn present(application: &gtk::Application) {
+    crate::assets::register_icon_theme();
     load_styles();
 
     let window = gtk::ApplicationWindow::builder()
@@ -30,7 +31,7 @@ pub fn present(application: &gtk::Application) {
 
     let header = gtk::HeaderBar::builder().title_widget(&title).build();
     let search_button = gtk::Button::builder()
-        .icon_name("system-search-symbolic")
+        .icon_name(crate::assets::icons::SEARCH)
         .tooltip_text("Search")
         .build();
     header.pack_end(&search_button);
@@ -77,23 +78,23 @@ fn build_sidebar(columns: &gtk::Box) -> gtk::Widget {
 
     let home = home_directory();
     for (icon, name, path) in [
-        ("user-home-symbolic", "Home", home.clone()),
+        (crate::assets::icons::HOME, "Home", home.clone()),
         (
-            "folder-documents-symbolic",
+            crate::assets::icons::DOCUMENTS,
             "Documents",
             home.join("Documents"),
         ),
         (
-            "folder-download-symbolic",
+            crate::assets::icons::DOWNLOADS,
             "Downloads",
             home.join("Downloads"),
         ),
         (
-            "folder-pictures-symbolic",
+            crate::assets::icons::PICTURES,
             "Pictures",
             home.join("Pictures"),
         ),
-        ("folder-videos-symbolic", "Videos", home.join("Videos")),
+        (crate::assets::icons::VIDEOS, "Videos", home.join("Videos")),
     ] {
         let row = gtk::Button::builder()
             .icon_name(icon)

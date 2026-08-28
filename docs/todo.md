@@ -46,12 +46,12 @@ Legend: **P0** blocks the milestone, **P1** is required for its exit criteria, *
 ### Design system
 
 - [x] Capture the prototype's layout, motion, typography, and interaction baseline
-- [ ] **P0** Audit and record licenses for every copied icon, font, and visual asset
+- [x] Audit and record licenses for the bundled JetBrains Mono font and Lucide icon subset
 - [ ] **P0** Replace widget-specific colors with semantic theme tokens
 - [ ] **P1** Define typography, spacing, radius, density, and animation tokens
-- [ ] **P1** Evaluate JetBrains Mono as the bundled/default visual profile with system fallbacks
+- [x] Bundle JetBrains Mono as the default visual profile with a system fallback
 - [ ] **P1** Define separate interface and monospace preview font settings
-- [ ] **P1** Define semantic icon roles and evaluate system icons versus a curated Lucide set
+- [x] Establish semantic icon names backed by a curated, namespaced Lucide subset
 - [ ] **P1** Add reduced-motion token and safe fallback values
 
 ## M1 — Navigation core

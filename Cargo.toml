@@ -10,4 +10,18 @@ keywords = ["file-manager", "gtk4", "linux", "wayland"]
 categories = ["filesystem", "gui"]
 
 [dependencies]
+fontconfig-sys = { package = "yeslogic-fontconfig-sys", version = "6.0.1" }
 gtk = { package = "gtk4", version = "0.10.3", features = ["v4_12"] }
+
+[build-dependencies]
+glib-build-tools = "0.21.0"
+
+[lints.rust]
+unsafe_code = "deny"
+unused_must_use = "deny"
+
+[lints.clippy]
+dbg_macro = "deny"
+todo = "warn"
+unimplemented = "warn"
+unwrap_used = "warn"

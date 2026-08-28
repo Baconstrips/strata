@@ -177,8 +177,8 @@ Destructive actions must be deliberate. Permanent deletion requires stronger con
 - It follows suitable system appearance defaults elsewhere.
 - Users can select or create a Strata-specific theme.
 - Themes use documented semantic tokens for surfaces, text, selection, borders, status colors, spacing, radii, and typography.
-- The default font follows the system UI font unless the Strata theme or user configuration overrides it.
-- Users can configure interface and monospace preview fonts independently.
+- The default visual profile uses JetBrains Mono with a safe system monospace fallback.
+- Users and themes can configure interface and monospace preview fonts independently.
 - Missing theme values always fall back safely.
 - Theme changes apply without restarting.
 

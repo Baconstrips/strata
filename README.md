@@ -44,12 +44,13 @@ Strata is an experimental, keyboard-first file manager for Linux. It is designed
 
 - Rust 1.85 or newer
 - GTK 4.12 or newer
+- Fontconfig
 - A C toolchain and `pkg-config`
 
 On Arch Linux:
 
 ```bash
-sudo pacman -S --needed base-devel rust gtk4
+sudo pacman -S --needed base-devel rust fontconfig gtk4
 ```
 
 Run Strata:
@@ -58,13 +59,17 @@ Run Strata:
 cargo run
 ```
 
-Run the checks:
+Run the standard quality checks:
 
 ```bash
-cargo fmt --check
-cargo clippy --all-targets --all-features -- -D warnings
-cargo test
+./scripts/check.sh
 ```
+
+The script always runs formatting, compilation, Clippy, and tests. It also runs dependency-policy and spelling checks when `cargo-deny` and `typos` are installed. CI runs the complete suite, including the minimum supported Rust version.
+
+## Bundled assets
+
+Strata includes a curated Lucide icon subset and the regular JetBrains Mono variable font. See [third-party notices](THIRD_PARTY_LICENSES.md) for versions, modifications, and complete attribution.
 
 ## Status
 

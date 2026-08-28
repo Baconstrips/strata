@@ -1,6 +1,8 @@
 window {
   background: #101b21;
   color: #d6e2ee;
+  font-family: "JetBrains Mono", "JetBrainsMono Nerd Font", monospace;
+  font-size: 13px;
 }
 
 headerbar {

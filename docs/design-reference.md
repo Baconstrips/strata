@@ -75,14 +75,14 @@ JetBrains Mono, ui-monospace, monospace
 
 for both interface and preview text. No font files are stored in the prototype repository.
 
-JetBrains Mono is therefore the leading default visual profile for Strata, subject to:
+Strata uses JetBrains Mono 2.304 as its bundled default visual profile. The font remains configurable and includes:
 
-- Confirming and preserving its OFL license when bundled
-- Providing a generic system fallback
-- Allowing separate interface and monospace-preview overrides
-- Respecting text scaling and accessibility requirements
+- Its complete OFL-1.1 license and attribution
+- A generic system monospace fallback
+- Planned separate interface and monospace-preview overrides
+- Native text scaling and accessibility behavior
 
-The font choice belongs to a theme/user preference rather than being embedded throughout widget styles.
+The font choice belongs to a semantic theme/user preference rather than being embedded throughout individual widget styles.
 
 ## Icons
 
