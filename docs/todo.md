@@ -81,7 +81,7 @@ Legend: **P0** blocks the milestone, **P1** is required for its exit criteria, *
 ### Navigation controls
 
 - [x] **P0** Back, forward, parent, and home commands
-- [ ] **P0** Editable location entry with validation and error feedback
+- [x] **P0** Editable location entry with validation and error feedback
 - [ ] **P1** Breadcrumb/path display
 - [x] **P1** Reveal and focus the active location after navigation
 - [ ] **P1** Handle symlinks and inaccessible destinations deliberately
@@ -91,7 +91,8 @@ Legend: **P0** blocks the milestone, **P1** is required for its exit criteria, *
 - [x] **P0** Arrow and `h/j/k/l` navigation
 - [x] **P0** Enter/open and Escape/close-peek-or-column actions
 - [ ] **P0** Space/preview action
-- [ ] **P0** Define focus transfer between sidebar, columns, location, search, and preview
+- [x] **P0** Define focus transfer between columns and location entry
+- [ ] **P0** Define focus transfer for sidebar, search, and preview
 - [x] **P1** Visible distinction between focus and selection
 - [ ] **P1** Multi-selection model and modifier behavior
 - [ ] **P1** Shortcut reference overlay

@@ -2,6 +2,7 @@
 
 use std::{
     cell::RefCell,
+    io::ErrorKind,
     rc::Rc,
     time::{Duration, Instant},
 };
@@ -10,13 +11,34 @@ use gtk::{gio, glib, prelude::*};
 
 use crate::{
     model::{EntryKind, FileEntry, MetadataValue},
-    services::{DirectoryEvent, DirectoryRequest, FileSource, LoadHandle},
+    services::{DirectoryEvent, DirectoryRequest, FileSource, LoadHandle, LocationValidationError},
 };
 
 #[derive(Default)]
 pub struct LocalFileSource;
 
+fn map_validation_error(error: std::io::Error) -> LocationValidationError {
+    match error.kind() {
+        ErrorKind::NotFound => LocationValidationError::Missing,
+        ErrorKind::PermissionDenied => LocationValidationError::Inaccessible,
+        _ => LocationValidationError::Unavailable(error.to_string()),
+    }
+}
+
 impl FileSource for LocalFileSource {
+    fn validate_location(
+        &self,
+        location: &crate::model::Location,
+    ) -> Result<(), LocationValidationError> {
+        let metadata = std::fs::metadata(location.path()).map_err(map_validation_error)?;
+        if !metadata.is_dir() {
+            return Err(LocationValidationError::NotDirectory);
+        }
+        std::fs::read_dir(location.path())
+            .map(|_| ())
+            .map_err(map_validation_error)
+    }
+
     fn enumerate(&self, request: DirectoryRequest, emit: Rc<dyn Fn(DirectoryEvent)>) -> LoadHandle {
         let request_id = request.id;
         let path = request.location.path().to_path_buf();
@@ -164,3 +186,6 @@ impl FileSource for LocalFileSource {
         }))
     }
 }
+
+#[cfg(test)]
+mod tests;

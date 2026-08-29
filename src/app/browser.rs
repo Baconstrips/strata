@@ -2,13 +2,17 @@
 
 use std::{
     cell::{Cell, RefCell},
+    path::PathBuf,
     rc::{Rc, Weak},
 };
 
 use crate::{
     app::navigation::{EntryInsertion, NavigationPath, NavigationState},
     model::{FileEntry, Location, SortDirection, SortKey, ViewPreferences},
-    services::{DirectoryEvent, DirectoryRequest, FileSource, LoadHandle, RequestId},
+    services::{
+        DirectoryEvent, DirectoryRequest, FileSource, LoadHandle, LocationValidationError,
+        RequestId,
+    },
 };
 
 #[derive(Clone, Debug)]
@@ -96,6 +100,33 @@ impl Browser {
 
     pub fn clear_observer(&self) {
         self.observer.take();
+    }
+
+    pub fn navigate_input(self: &Rc<Self>, input: &str) -> Result<(), LocationValidationError> {
+        if input.is_empty() {
+            return Err(LocationValidationError::Empty);
+        }
+
+        let location = self
+            .active_location()
+            .filter(|current| current.display_path() == input)
+            .unwrap_or_else(|| Location::local(PathBuf::from(input)));
+        if !location.path().is_absolute() {
+            return Err(LocationValidationError::NotAbsolute);
+        }
+        self.source.validate_location(&location)?;
+        self.navigate(location);
+        Ok(())
+    }
+
+    pub fn active_location(&self) -> Option<Location> {
+        self.state.borrow().active_location()
+    }
+
+    pub fn focus_active(&self) {
+        if let Some((depth, position)) = self.state.borrow().active_focus() {
+            self.emit(BrowserEvent::FocusChanged { depth, position });
+        }
     }
 
     pub fn navigate(self: &Rc<Self>, location: Location) {

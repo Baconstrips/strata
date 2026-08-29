@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use std::rc::Rc;
+use std::{fmt, rc::Rc};
 
 use crate::model::{FileEntry, Location};
 
@@ -13,6 +13,33 @@ pub struct DirectoryRequest {
     pub location: Location,
     pub batch_size: usize,
     pub include_hidden: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum LocationValidationError {
+    Empty,
+    NotAbsolute,
+    Missing,
+    NotDirectory,
+    Inaccessible,
+    Unavailable(String),
+}
+
+impl fmt::Display for LocationValidationError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Empty => formatter.write_str("Enter a location."),
+            Self::NotAbsolute => formatter.write_str("Enter an absolute path."),
+            Self::Missing => formatter.write_str("That location does not exist."),
+            Self::NotDirectory => formatter.write_str("That location is not a directory."),
+            Self::Inaccessible => {
+                formatter.write_str("You do not have permission to open that location.")
+            }
+            Self::Unavailable(message) => {
+                write!(formatter, "Unable to open that location: {message}")
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -52,6 +79,8 @@ impl Drop for LoadHandle {
 }
 
 pub trait FileSource {
+    fn validate_location(&self, location: &Location) -> Result<(), LocationValidationError>;
+
     fn enumerate(&self, request: DirectoryRequest, emit: Rc<dyn Fn(DirectoryEvent)>) -> LoadHandle;
 
     fn watch(&self, _location: Location, _notify: Rc<dyn Fn()>) -> Option<LoadHandle> {

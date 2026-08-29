@@ -53,6 +53,8 @@ impl Default for PeekBehavior {
 
 struct ViewState {
     overlay: gtk::Overlay,
+    location_entry: gtk::Entry,
+    location_error: gtk::Label,
     columns_widget: gtk::Box,
     scroller: gtk::ScrolledWindow,
     columns: RefCell<Vec<ColumnView>>,
@@ -64,6 +66,7 @@ struct ViewState {
     browser: Rc<Browser>,
 }
 
+#[derive(Clone)]
 pub struct BrowserView {
     state: Rc<ViewState>,
 }
@@ -85,9 +88,23 @@ impl BrowserView {
         let overlay = gtk::Overlay::new();
         overlay.set_child(Some(&scroller));
 
+        let location_entry = gtk::Entry::builder()
+            .hexpand(true)
+            .width_chars(48)
+            .placeholder_text("Enter an absolute path")
+            .tooltip_text("Location (Ctrl+L)")
+            .build();
+        location_entry.add_css_class("location-entry");
+        let location_error = gtk::Label::new(None);
+        location_error.add_css_class("location-error");
+        location_error.set_visible(false);
+        location_error.set_xalign(0.0);
+
         let browser = Browser::new(source);
         let state = Rc::new(ViewState {
             overlay,
+            location_entry,
+            location_error,
             columns_widget,
             scroller,
             columns: RefCell::new(Vec::new()),
@@ -106,6 +123,13 @@ impl BrowserView {
             .browser
             .observe(move |event| observer_state.handle(event));
 
+        let weak_state = Rc::downgrade(&state);
+        state.location_entry.connect_activate(move |_| {
+            if let Some(state) = weak_state.upgrade() {
+                state.submit_location();
+            }
+        });
+
         Self { state }
     }
 
@@ -122,14 +146,73 @@ impl BrowserView {
     pub fn browser(&self) -> Rc<Browser> {
         self.state.browser.clone()
     }
+
+    pub fn location_widget(&self) -> gtk::Widget {
+        let container = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        container.add_css_class("location-control");
+        container.append(&self.state.location_entry);
+        container.append(&self.state.location_error);
+        container.upcast()
+    }
+
+    pub fn begin_location_edit(&self) {
+        self.state.clear_location_error();
+        self.state.location_entry.grab_focus();
+        self.state.location_entry.select_region(0, -1);
+    }
+
+    pub fn location_has_focus(&self) -> bool {
+        self.state.location_entry.has_focus()
+    }
+
+    pub fn cancel_location_edit(&self) {
+        self.state.restore_location_text();
+        self.state.clear_location_error();
+        self.state.browser.focus_active();
+    }
 }
 
 impl ViewState {
+    fn submit_location(self: &Rc<Self>) {
+        let input = self.location_entry.text();
+        match self.browser.navigate_input(input.as_str()) {
+            Ok(()) => self.clear_location_error(),
+            Err(error) => {
+                self.location_entry.add_css_class("error");
+                self.location_error.set_text(&error.to_string());
+                self.location_error.set_visible(true);
+                self.location_entry.grab_focus();
+            }
+        }
+    }
+
+    fn restore_location_text(&self) {
+        if let Some(location) = self.browser.active_location() {
+            self.location_entry.set_text(&location.display_path());
+        }
+    }
+
+    fn clear_location_error(&self) {
+        self.location_entry.remove_css_class("error");
+        self.location_error.set_visible(false);
+        self.location_error.set_text("");
+    }
+
     fn handle(self: &Rc<Self>, event: BrowserEvent) {
         match event {
-            BrowserEvent::Reset => self.truncate(0),
-            BrowserEvent::ColumnsTruncated { len } => self.truncate(len),
-            BrowserEvent::ColumnAdded { depth, location } => self.append_column(depth, &location),
+            BrowserEvent::Reset => {
+                self.truncate(0);
+                self.clear_location_error();
+            }
+            BrowserEvent::ColumnsTruncated { len } => {
+                self.truncate(len);
+                self.restore_location_text();
+            }
+            BrowserEvent::ColumnAdded { depth, location } => {
+                self.location_entry.set_text(&location.display_path());
+                self.clear_location_error();
+                self.append_column(depth, &location);
+            }
             BrowserEvent::EntriesInserted { depth, insertions } => {
                 let render_started = Instant::now();
                 let entry_count = insertions

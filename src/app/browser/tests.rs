@@ -10,6 +10,8 @@ use crate::{
 
 struct FakeFileSource;
 
+struct RejectingFileSource;
+
 struct TrackingFileSource {
     cancellations: Rc<Cell<usize>>,
 }
@@ -25,6 +27,10 @@ struct WatchingFileSource {
 }
 
 impl FileSource for WatchingFileSource {
+    fn validate_location(&self, _location: &Location) -> Result<(), LocationValidationError> {
+        Ok(())
+    }
+
     fn enumerate(&self, request: DirectoryRequest, emit: Rc<dyn Fn(DirectoryEvent)>) -> LoadHandle {
         emit(DirectoryEvent::Batch {
             request_id: request.id,
@@ -50,6 +56,10 @@ impl FileSource for WatchingFileSource {
 }
 
 impl FileSource for RecordingFileSource {
+    fn validate_location(&self, _location: &Location) -> Result<(), LocationValidationError> {
+        Ok(())
+    }
+
     fn enumerate(
         &self,
         request: DirectoryRequest,
@@ -63,6 +73,10 @@ impl FileSource for RecordingFileSource {
 }
 
 impl FileSource for TrackingFileSource {
+    fn validate_location(&self, _location: &Location) -> Result<(), LocationValidationError> {
+        Ok(())
+    }
+
     fn enumerate(
         &self,
         _request: DirectoryRequest,
@@ -73,7 +87,25 @@ impl FileSource for TrackingFileSource {
     }
 }
 
+impl FileSource for RejectingFileSource {
+    fn validate_location(&self, _location: &Location) -> Result<(), LocationValidationError> {
+        Err(LocationValidationError::Inaccessible)
+    }
+
+    fn enumerate(
+        &self,
+        _request: DirectoryRequest,
+        _emit: Rc<dyn Fn(DirectoryEvent)>,
+    ) -> LoadHandle {
+        LoadHandle::new(|| {})
+    }
+}
+
 impl FileSource for FakeFileSource {
+    fn validate_location(&self, _location: &Location) -> Result<(), LocationValidationError> {
+        Ok(())
+    }
+
     fn enumerate(&self, request: DirectoryRequest, emit: Rc<dyn Fn(DirectoryEvent)>) -> LoadHandle {
         emit(DirectoryEvent::Batch {
             request_id: request.id,
@@ -171,6 +203,62 @@ fn file_source_can_be_replaced_without_constructing_the_ui() {
             .iter()
             .any(|event| matches!(event, BrowserEvent::LoadFinished { .. }))
     );
+}
+
+#[test]
+fn valid_location_input_navigates_through_the_controller() {
+    let browser = Browser::new(Rc::new(FakeFileSource));
+    let events = Rc::new(RefCell::new(Vec::new()));
+    let observed = events.clone();
+    browser.observe(move |event| observed.borrow_mut().push(event));
+    browser.navigate(Location::local("/fixture"));
+    events.borrow_mut().clear();
+
+    assert_eq!(browser.navigate_input("/accepted"), Ok(()));
+
+    assert_eq!(
+        browser.active_location(),
+        Some(Location::local("/accepted"))
+    );
+    assert!(events.borrow().iter().any(|event| matches!(
+        event,
+        BrowserEvent::ColumnAdded { depth: 0, location }
+            if location == &Location::local("/accepted")
+    )));
+}
+
+#[test]
+fn rejected_location_input_preserves_navigation_state() {
+    let browser = Browser::new(Rc::new(RejectingFileSource));
+    let events = Rc::new(RefCell::new(Vec::new()));
+    let observed = events.clone();
+    browser.observe(move |event| observed.borrow_mut().push(event));
+    browser.navigate(Location::local("/fixture"));
+    events.borrow_mut().clear();
+
+    assert_eq!(
+        browser.navigate_input("/restricted"),
+        Err(LocationValidationError::Inaccessible)
+    );
+
+    assert_eq!(browser.active_location(), Some(Location::local("/fixture")));
+    assert!(events.borrow().is_empty());
+}
+
+#[test]
+fn invalid_location_text_is_rejected_before_the_provider() {
+    let browser = Browser::new(Rc::new(FakeFileSource));
+    browser.navigate(Location::local("/fixture"));
+
+    assert_eq!(
+        browser.navigate_input(""),
+        Err(LocationValidationError::Empty)
+    );
+    assert_eq!(
+        browser.navigate_input("relative/path"),
+        Err(LocationValidationError::NotAbsolute)
+    );
+    assert_eq!(browser.active_location(), Some(Location::local("/fixture")));
 }
 
 #[test]

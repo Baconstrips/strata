@@ -242,6 +242,11 @@ impl NavigationState {
         Some((depth, self.columns.get(depth)?.selected))
     }
 
+    pub fn active_location(&self) -> Option<Location> {
+        let depth = self.active_column?;
+        Some(self.columns.get(depth)?.location.clone())
+    }
+
     pub fn finish(&mut self, request_id: RequestId) -> Option<usize> {
         let (depth, column) = self.column_for_request_mut(request_id)?;
         column.load_state = if column.entries.is_empty() {

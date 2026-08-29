@@ -17,6 +17,11 @@ impl Location {
         &self.path
     }
 
+    /// Returns a UTF-8-safe representation without changing the native path.
+    pub fn display_path(&self) -> String {
+        self.path.to_string_lossy().into_owned()
+    }
+
     pub fn display_name(&self) -> String {
         self.path
             .file_name()

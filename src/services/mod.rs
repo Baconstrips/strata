@@ -2,4 +2,6 @@
 
 mod file_source;
 
-pub use file_source::{DirectoryEvent, DirectoryRequest, FileSource, LoadHandle, RequestId};
+pub use file_source::{
+    DirectoryEvent, DirectoryRequest, FileSource, LoadHandle, LocationValidationError, RequestId,
+};

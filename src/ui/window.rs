@@ -32,7 +32,10 @@ pub fn present_location(application: &gtk::Application, location: Option<PathBuf
 
     let title = gtk::Label::new(Some("Strata"));
     title.add_css_class("title");
-    let header = gtk::HeaderBar::builder().title_widget(&title).build();
+    let title_area = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+    title_area.append(&title);
+    title_area.append(&browser.location_widget());
+    let header = gtk::HeaderBar::builder().title_widget(&title_area).build();
     let search_button = gtk::Button::builder()
         .icon_name(crate::assets::icons::SEARCH)
         .tooltip_text("Search")
@@ -126,7 +129,7 @@ pub fn present_location(application: &gtk::Application, location: Option<PathBuf
     root.append(&content);
 
     window.set_child(Some(&root));
-    install_keyboard_navigation(&window, &controller);
+    install_keyboard_navigation(&window, &browser);
     browser.navigate(location.unwrap_or_else(home_directory));
 
     let browser_controller = browser.browser();
@@ -135,16 +138,28 @@ pub fn present_location(application: &gtk::Application, location: Option<PathBuf
     crate::metrics::mark_window_presented();
 }
 
-fn install_keyboard_navigation(window: &gtk::ApplicationWindow, browser: &Rc<Browser>) {
+fn install_keyboard_navigation(window: &gtk::ApplicationWindow, view: &BrowserView) {
     let keys = gtk::EventControllerKey::new();
     keys.set_propagation_phase(gtk::PropagationPhase::Capture);
-    let weak_browser = Rc::downgrade(browser);
+    let view = view.clone();
+    let weak_browser = Rc::downgrade(&view.browser());
     keys.connect_key_pressed(move |_, key, _, modifiers| {
         let Some(browser) = weak_browser.upgrade() else {
             return glib::Propagation::Proceed;
         };
         let alt = modifiers.contains(gtk::gdk::ModifierType::ALT_MASK);
         let control = modifiers.contains(gtk::gdk::ModifierType::CONTROL_MASK);
+        if control && key == gtk::gdk::Key::l {
+            view.begin_location_edit();
+            return glib::Propagation::Stop;
+        }
+        if view.location_has_focus() {
+            if key == gtk::gdk::Key::Escape {
+                view.cancel_location_edit();
+                return glib::Propagation::Stop;
+            }
+            return glib::Propagation::Proceed;
+        }
         if control && key == gtk::gdk::Key::h {
             browser.toggle_hidden();
             return glib::Propagation::Stop;

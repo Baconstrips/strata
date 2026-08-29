@@ -11,6 +11,25 @@ headerbar {
   box-shadow: none;
 }
 
+.location-control {
+  min-width: 28em;
+}
+
+.location-entry {
+  min-height: 30px;
+}
+
+.location-entry.error {
+  border-color: #f87171;
+  box-shadow: 0 0 0 1px alpha(#f87171, 0.45);
+}
+
+.location-error {
+  color: #fca5a5;
+  font-size: 0.82em;
+  margin: 2px 6px 0;
+}
+
 .sidebar {
   background: #0b1216;
   border-right: 1px solid alpha(#8bc9eb, 0.14);
