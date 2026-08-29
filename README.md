@@ -29,6 +29,7 @@ Strata is an experimental, keyboard-first file manager for Linux. It is designed
 - [Work breakdown](docs/todo.md) — actionable project checklist
 - [Architecture principles](docs/architecture.md) — boundaries and customization strategy
 - [Prototype design reference](docs/design-reference.md) — visual tokens, motion, and interaction baseline
+- [Themes](docs/themes.md) — custom theme schema and Omarchy Quattro integration
 - [Unsafe code policy](docs/unsafe-code.md) — exception requirements and current inventory
 - [Initial technical direction](docs/technical-direction.md) — original technical assessment
 

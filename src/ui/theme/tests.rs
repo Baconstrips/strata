@@ -1,0 +1,44 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+use super::{blend, slugify, title_case_slug, tokens_from_quattro};
+
+#[test]
+fn names_become_safe_config_file_slugs() {
+    assert_eq!(slugify("  Rosé / Pine!  "), "ros-pine");
+    assert_eq!(slugify("Ocean  Blue"), "ocean-blue");
+}
+
+#[test]
+fn omarchy_slugs_become_display_names() {
+    assert_eq!(title_case_slug("tokyo-night"), "Tokyo Night");
+}
+
+#[test]
+fn colors_can_be_blended_into_semantic_tokens() {
+    assert_eq!(blend("#000000", "#ffffff", 0.5), "#808080");
+}
+
+#[test]
+fn quattro_colors_map_to_strata_tokens() {
+    let theme = tokens_from_quattro(
+        "azure-glow",
+        r##"
+background = "#0a0f1a"
+foreground = "#a8dfff"
+accent = "#00aaff"
+selection = "#a8dfff"
+color8 = "#123247"
+"##,
+    )
+    .expect("valid Quattro colors should map");
+
+    assert_eq!(theme.name, "Azure Glow");
+    assert_eq!(theme.background, "#0d1b2a");
+    assert_eq!(theme.accent, "#00aaff");
+    assert_eq!(theme.border, "#487089");
+}
+
+#[test]
+fn legacy_palette_without_quattro_semantics_is_not_detected() {
+    assert!(tokens_from_quattro("legacy", "color4 = \"#00aaff\"").is_none());
+}

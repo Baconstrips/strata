@@ -15,7 +15,7 @@ use crate::{adapters::LocalFileSource, app::Browser, model::Location};
 use super::{
     blur::BlurBin,
     browser::{BrowserView, PeekBehavior},
-    motion::{animations_enabled, emphasized_deceleration, set_reduce_motion},
+    motion::{animations_enabled, emphasized_deceleration},
 };
 
 const SIDEBAR_WIDTH: i32 = 208;
@@ -27,6 +27,7 @@ pub fn present(application: &gtk::Application) {
 
 pub fn present_location(application: &gtk::Application, location: Option<PathBuf>) {
     crate::assets::register_icon_theme();
+    let theme_manager = super::theme::ThemeManager::shared();
     load_styles();
 
     let window = gtk::ApplicationWindow::builder()
@@ -104,7 +105,8 @@ pub fn present_location(application: &gtk::Application, location: Option<PathBuf
     let window_overlay = gtk::Overlay::new();
     let blurred_root = BlurBin::new(&root);
     window_overlay.set_child(Some(&blurred_root));
-    let settings_layer = build_settings_layer(&browser, &settings, &blurred_root);
+    let settings_layer =
+        super::settings::build_layer(&browser, &settings, &blurred_root, theme_manager);
     window_overlay.add_overlay(&settings_layer);
     let shown_settings = settings_layer.clone();
     let settings_button = settings.clone();
@@ -340,141 +342,6 @@ fn show_settings(layer: &gtk::Box, button: &gtk::Button, root: &BlurBin) {
     layer.grab_focus();
     button.set_icon_name(crate::assets::icons::SETTINGS_ACTIVE);
     button.add_css_class("active");
-}
-
-fn build_settings_layer(
-    browser: &BrowserView,
-    settings_button: &gtk::Button,
-    root: &BlurBin,
-) -> gtk::Box {
-    let layer = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    layer.add_css_class("settings-backdrop");
-    layer.set_halign(gtk::Align::Fill);
-    layer.set_valign(gtk::Align::Fill);
-    layer.set_hexpand(true);
-    layer.set_vexpand(true);
-    layer.set_focusable(true);
-    layer.set_visible(false);
-
-    let panel = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-    panel.add_css_class("settings-dialog");
-    panel.set_halign(gtk::Align::Center);
-    panel.set_valign(gtk::Align::Center);
-    panel.set_size_request(760, 500);
-
-    let navigation = gtk::Box::new(gtk::Orientation::Vertical, 8);
-    navigation.add_css_class("settings-navigation");
-    append_menu_heading(&navigation, "SETTINGS");
-    let general = gtk::Button::with_label("General");
-    general.add_css_class("settings-nav-active");
-    general.set_has_frame(false);
-    navigation.append(&general);
-    let keybindings = gtk::Button::with_label("Keybindings");
-    keybindings.set_sensitive(false);
-    keybindings.set_has_frame(false);
-    navigation.append(&keybindings);
-    let theme = gtk::Button::with_label("Theme & appearance");
-    theme.set_sensitive(false);
-    theme.set_has_frame(false);
-    navigation.append(&theme);
-    panel.append(&navigation);
-
-    let page = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    page.add_css_class("settings-page");
-    page.set_hexpand(true);
-    let titlebar = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-    titlebar.add_css_class("settings-titlebar");
-    let title = gtk::Label::new(Some("General"));
-    title.set_xalign(0.0);
-    title.set_hexpand(true);
-    title.add_css_class("settings-title");
-    let close = gtk::Button::builder()
-        .icon_name(crate::assets::icons::X)
-        .tooltip_text("Close settings")
-        .build();
-    close.add_css_class("settings-close");
-    titlebar.append(&title);
-    titlebar.append(&close);
-    page.append(&titlebar);
-
-    let preferences = gtk::Box::new(gtk::Orientation::Vertical, 12);
-    preferences.add_css_class("settings-preferences");
-    append_menu_heading(&preferences, "BROWSING");
-    let (peeking_row, peeking) = settings_option(
-        "Folder peeking",
-        "Preview folders automatically while moving through a pane.",
-        true,
-    );
-    let browser = browser.clone();
-    peeking.connect_active_notify(move |toggle| browser.set_peek_enabled(toggle.is_active()));
-    preferences.append(&peeking_row);
-
-    append_menu_heading(&preferences, "MOTION");
-    let (motion_row, reduce_motion) = settings_option(
-        "Reduce motion",
-        "Disable nonessential interface animations.",
-        false,
-    );
-    reduce_motion.connect_active_notify(|toggle| set_reduce_motion(toggle.is_active()));
-    preferences.append(&motion_row);
-    page.append(&preferences);
-    panel.append(&page);
-    let top_spacer = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    top_spacer.set_vexpand(true);
-    let bottom_spacer = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    bottom_spacer.set_vexpand(true);
-    layer.append(&top_spacer);
-    layer.append(&panel);
-    layer.append(&bottom_spacer);
-
-    let hidden_layer = layer.clone();
-    let inactive_settings = settings_button.clone();
-    let unblurred_root = root.clone();
-    close.connect_clicked(move |_| {
-        hidden_layer.set_visible(false);
-        unblurred_root.set_blurred(false);
-        inactive_settings.set_icon_name(crate::assets::icons::SETTINGS);
-        inactive_settings.remove_css_class("active");
-    });
-    let hidden_layer = layer.clone();
-    let inactive_settings = settings_button.clone();
-    let unblurred_root = root.clone();
-    let keys = gtk::EventControllerKey::new();
-    keys.connect_key_pressed(move |_, key, _, _| {
-        if key != gtk::gdk::Key::Escape {
-            return glib::Propagation::Proceed;
-        }
-        hidden_layer.set_visible(false);
-        unblurred_root.set_blurred(false);
-        inactive_settings.set_icon_name(crate::assets::icons::SETTINGS);
-        inactive_settings.remove_css_class("active");
-        glib::Propagation::Stop
-    });
-    layer.add_controller(keys);
-    layer
-}
-
-fn settings_option(title: &str, description: &str, active: bool) -> (gtk::Box, gtk::Switch) {
-    let row = gtk::Box::new(gtk::Orientation::Horizontal, 16);
-    row.add_css_class("settings-option");
-    let copy = gtk::Box::new(gtk::Orientation::Vertical, 2);
-    copy.set_hexpand(true);
-    let title = gtk::Label::new(Some(title));
-    title.set_xalign(0.0);
-    title.add_css_class("settings-option-title");
-    let description = gtk::Label::new(Some(description));
-    description.set_xalign(0.0);
-    description.set_wrap(true);
-    description.add_css_class("settings-option-description");
-    copy.append(&title);
-    copy.append(&description);
-    let toggle = gtk::Switch::builder()
-        .active(active)
-        .valign(gtk::Align::Center)
-        .build();
-    row.append(&copy);
-    row.append(&toggle);
-    (row, toggle)
 }
 
 fn append_menu_heading(container: &gtk::Box, text: &str) {

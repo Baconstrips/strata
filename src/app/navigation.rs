@@ -481,6 +481,15 @@ impl NavigationState {
         self.columns.get(depth)?.entries.get(position).cloned()
     }
 
+    pub fn active_child_position(&self, depth: usize) -> Option<usize> {
+        let child = &self.columns.get(depth + 1)?.location;
+        self.columns
+            .get(depth)?
+            .entries
+            .iter()
+            .position(|entry| &entry.location == child)
+    }
+
     pub fn focused_entry(&self) -> Option<(usize, usize, FileEntry)> {
         let depth = self.active_column?;
         let column = self.columns.get(depth)?;

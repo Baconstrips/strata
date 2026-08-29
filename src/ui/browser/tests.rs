@@ -11,6 +11,19 @@ fn file_sizes_use_compact_decimal_units() {
 }
 
 #[test]
+fn file_names_map_to_specific_lucide_icons() {
+    assert_eq!(icon_for_name("setup.sh"), crate::assets::icons::TERMINAL);
+    assert_eq!(icon_for_name("photo.webp"), crate::assets::icons::PICTURES);
+    assert_eq!(icon_for_name("movie.mkv"), crate::assets::icons::VIDEOS);
+    assert_eq!(icon_for_name("source.rs"), crate::assets::icons::FILE_CODE);
+    assert_eq!(
+        icon_for_name("backup.tar"),
+        crate::assets::icons::FILE_ARCHIVE
+    );
+    assert_eq!(icon_for_name("README.md"), crate::assets::icons::DOCUMENTS);
+}
+
+#[test]
 fn reveal_target_scrolls_only_enough_to_show_the_new_column() {
     assert_eq!(
         horizontal_reveal_target(0.0, 900.0, 0.0, 1_200.0, 900.0, 1_200.0),

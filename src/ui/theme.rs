@@ -1,0 +1,486 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+use std::{
+    cell::{Cell, RefCell},
+    fs, io,
+    path::PathBuf,
+    rc::Rc,
+};
+
+use gtk::{gdk, gio, prelude::*};
+use serde::{Deserialize, Serialize};
+
+thread_local! {
+    static SHARED_MANAGER: RefCell<std::rc::Weak<ThemeManager>> = const { RefCell::new(std::rc::Weak::new()) };
+}
+
+const BUILTIN_THEMES: [(&str, &str); 6] = [
+    (
+        "azure-glow",
+        include_str!("../../data/themes/azure-glow.toml"),
+    ),
+    (
+        "tokyo-night",
+        include_str!("../../data/themes/tokyo-night.toml"),
+    ),
+    (
+        "catppuccin",
+        include_str!("../../data/themes/catppuccin.toml"),
+    ),
+    (
+        "everforest",
+        include_str!("../../data/themes/everforest.toml"),
+    ),
+    (
+        "rose-pine",
+        include_str!("../../data/themes/rose-pine.toml"),
+    ),
+    (
+        "omarchy-light",
+        include_str!("../../data/themes/omarchy-light.toml"),
+    ),
+];
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct ThemeTokens {
+    pub name: String,
+    pub background: String,
+    pub surface: String,
+    pub text: String,
+    pub accent: String,
+    pub muted: String,
+    pub highlight: String,
+    pub border: String,
+    pub dim_text: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct Theme {
+    pub id: String,
+    pub tokens: ThemeTokens,
+    pub custom: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct Preferences {
+    mode: String,
+    theme: String,
+}
+
+impl Default for Preferences {
+    fn default() -> Self {
+        Self {
+            mode: "theme".to_owned(),
+            theme: "azure-glow".to_owned(),
+        }
+    }
+}
+
+pub struct ThemeManager {
+    provider: gtk::CssProvider,
+    themes: RefCell<Vec<Theme>>,
+    preferences: RefCell<Preferences>,
+    omarchy_available: bool,
+    omarchy_monitor: RefCell<Option<gio::FileMonitor>>,
+    previewing: Cell<bool>,
+}
+
+impl ThemeManager {
+    pub fn shared() -> Rc<Self> {
+        SHARED_MANAGER.with(|shared| {
+            if let Some(manager) = shared.borrow().upgrade() {
+                return manager;
+            }
+            let manager = Self::load();
+            shared.replace(Rc::downgrade(&manager));
+            manager
+        })
+    }
+
+    fn load() -> Rc<Self> {
+        let mut themes = builtins();
+        themes.extend(load_custom_themes());
+        let omarchy_available = load_omarchy_theme().is_some();
+        let mut preferences = read_preferences().unwrap_or_default();
+        if !themes.iter().any(|theme| theme.id == preferences.theme) {
+            preferences.theme = "azure-glow".to_owned();
+        }
+        if preferences.mode == "omarchy" && !omarchy_available {
+            preferences.mode = "theme".to_owned();
+        } else if !settings_path().is_file() && omarchy_available {
+            preferences.mode = "omarchy".to_owned();
+        }
+
+        let manager = Rc::new(Self {
+            provider: gtk::CssProvider::new(),
+            themes: RefCell::new(themes),
+            preferences: RefCell::new(preferences),
+            omarchy_available,
+            omarchy_monitor: RefCell::new(None),
+            previewing: Cell::new(false),
+        });
+        manager.install_provider();
+        manager.apply_selected();
+        manager.monitor_omarchy();
+        manager
+    }
+
+    pub fn themes(&self) -> Vec<Theme> {
+        self.themes.borrow().clone()
+    }
+
+    pub fn is_omarchy_available(&self) -> bool {
+        self.omarchy_available
+    }
+
+    pub fn follows_omarchy(&self) -> bool {
+        self.preferences.borrow().mode == "omarchy"
+    }
+
+    pub fn selected_id(&self) -> String {
+        self.preferences.borrow().theme.clone()
+    }
+
+    pub fn select_theme(&self, id: &str) {
+        if !self.themes.borrow().iter().any(|theme| theme.id == id) {
+            return;
+        }
+        {
+            let mut preferences = self.preferences.borrow_mut();
+            preferences.mode = "theme".to_owned();
+            preferences.theme = id.to_owned();
+        }
+        self.previewing.set(false);
+        self.apply_selected();
+        self.save_preferences();
+    }
+
+    pub fn set_follow_omarchy(&self, enabled: bool) {
+        if enabled && !self.omarchy_available {
+            return;
+        }
+        self.preferences.borrow_mut().mode = if enabled {
+            "omarchy".to_owned()
+        } else {
+            "theme".to_owned()
+        };
+        self.previewing.set(false);
+        self.apply_selected();
+        self.save_preferences();
+    }
+
+    pub fn preview(&self, tokens: &ThemeTokens) {
+        if validate_tokens(tokens).is_ok() {
+            self.previewing.set(true);
+            self.apply_tokens(tokens);
+        }
+    }
+
+    pub fn cancel_preview(&self) {
+        if self.previewing.replace(false) {
+            self.apply_selected();
+        }
+    }
+
+    pub fn save_custom_theme(&self, tokens: ThemeTokens) -> io::Result<String> {
+        validate_tokens(&tokens)
+            .map_err(|message| io::Error::new(io::ErrorKind::InvalidInput, message))?;
+        let base = slugify(&tokens.name);
+        if base.is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Enter a theme name",
+            ));
+        }
+        let directory = themes_directory();
+        fs::create_dir_all(&directory)?;
+        let mut id = base.clone();
+        let mut suffix = 2;
+        while self.themes.borrow().iter().any(|theme| theme.id == id) {
+            id = format!("{base}-{suffix}");
+            suffix += 1;
+        }
+        fs::write(
+            directory.join(format!("{id}.toml")),
+            toml::to_string_pretty(&tokens).map_err(io::Error::other)?,
+        )?;
+
+        let mut themes = self.themes.borrow_mut();
+        if let Some(theme) = themes
+            .iter_mut()
+            .find(|theme| theme.id == id && theme.custom)
+        {
+            theme.tokens = tokens;
+        } else {
+            themes.push(Theme {
+                id: id.clone(),
+                tokens,
+                custom: true,
+            });
+        }
+        drop(themes);
+        self.select_theme(&id);
+        Ok(id)
+    }
+
+    pub fn starter_tokens(&self) -> ThemeTokens {
+        self.current_tokens().unwrap_or_else(azure_tokens)
+    }
+
+    fn install_provider(&self) {
+        if let Some(display) = gdk::Display::default() {
+            gtk::style_context_add_provider_for_display(
+                &display,
+                &self.provider,
+                gtk::STYLE_PROVIDER_PRIORITY_APPLICATION + 1,
+            );
+        }
+    }
+
+    fn apply_selected(&self) {
+        if self.follows_omarchy() {
+            if let Some(tokens) = load_omarchy_theme() {
+                self.apply_tokens(&tokens);
+            }
+            return;
+        }
+        if let Some(tokens) = self.current_tokens() {
+            self.apply_tokens(&tokens);
+        }
+    }
+
+    fn current_tokens(&self) -> Option<ThemeTokens> {
+        let id = self.preferences.borrow().theme.clone();
+        self.themes
+            .borrow()
+            .iter()
+            .find(|theme| theme.id == id)
+            .map(|theme| theme.tokens.clone())
+    }
+
+    fn apply_tokens(&self, tokens: &ThemeTokens) {
+        self.provider.load_from_string(&tokens_css(tokens));
+    }
+
+    fn save_preferences(&self) {
+        let path = settings_path();
+        let result = (|| -> io::Result<()> {
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            let value =
+                toml::to_string_pretty(&*self.preferences.borrow()).map_err(io::Error::other)?;
+            fs::write(path, value)
+        })();
+        if let Err(error) = result {
+            tracing::warn!(%error, "unable to save theme preference");
+        }
+    }
+
+    fn monitor_omarchy(self: &Rc<Self>) {
+        if !self.omarchy_available {
+            return;
+        }
+        let file = gio::File::for_path(omarchy_state_dir());
+        let Ok(monitor) =
+            file.monitor_directory(gio::FileMonitorFlags::NONE, gio::Cancellable::NONE)
+        else {
+            return;
+        };
+        let weak = Rc::downgrade(self);
+        monitor.connect_changed(move |_, _, _, _| {
+            if let Some(manager) = weak.upgrade() {
+                if manager.follows_omarchy() && !manager.previewing.get() {
+                    manager.apply_selected();
+                }
+            }
+        });
+        self.omarchy_monitor.replace(Some(monitor));
+    }
+}
+
+fn builtins() -> Vec<Theme> {
+    BUILTIN_THEMES
+        .iter()
+        .filter_map(|(id, source)| {
+            toml::from_str(source).ok().map(|tokens| Theme {
+                id: (*id).to_owned(),
+                tokens,
+                custom: false,
+            })
+        })
+        .collect()
+}
+
+fn azure_tokens() -> ThemeTokens {
+    toml::from_str(BUILTIN_THEMES[0].1).unwrap_or_else(|_| ThemeTokens {
+        name: "Azure Glow".to_owned(),
+        background: "#0c1a2b".to_owned(),
+        surface: "#122438".to_owned(),
+        text: "#c9deed".to_owned(),
+        accent: "#4fd6ff".to_owned(),
+        muted: "#1e3a52".to_owned(),
+        highlight: "#244d68".to_owned(),
+        border: "#315b75".to_owned(),
+        dim_text: "#6f8da3".to_owned(),
+    })
+}
+
+fn load_custom_themes() -> Vec<Theme> {
+    let Ok(entries) = fs::read_dir(themes_directory()) else {
+        return Vec::new();
+    };
+    let mut themes: Vec<_> = entries
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            entry
+                .path()
+                .extension()
+                .is_some_and(|extension| extension == "toml")
+        })
+        .filter_map(|entry| {
+            let id = entry.path().file_stem()?.to_string_lossy().into_owned();
+            let source = fs::read_to_string(entry.path()).ok()?;
+            let tokens: ThemeTokens = toml::from_str(&source).ok()?;
+            validate_tokens(&tokens).ok()?;
+            Some(Theme {
+                id,
+                tokens,
+                custom: true,
+            })
+        })
+        .collect();
+    themes.sort_by(|left, right| left.tokens.name.cmp(&right.tokens.name));
+    themes
+}
+
+fn read_preferences() -> Option<Preferences> {
+    toml::from_str(&fs::read_to_string(settings_path()).ok()?).ok()
+}
+
+fn load_omarchy_theme() -> Option<ThemeTokens> {
+    let state = omarchy_state_dir();
+    let name = fs::read_to_string(state.join("theme.name")).ok()?;
+    let colors = fs::read_to_string(state.join("theme/colors.toml")).ok()?;
+    tokens_from_quattro(name.trim(), &colors)
+}
+
+fn tokens_from_quattro(name: &str, source: &str) -> Option<ThemeTokens> {
+    let values: toml::Value = toml::from_str(source).ok()?;
+    let get = |key: &str| {
+        values
+            .get(key)
+            .and_then(toml::Value::as_str)
+            .map(str::to_owned)
+    };
+    let source_background = get("background")?;
+    let text = get("foreground")?;
+    let accent = get("accent")?;
+    let selection = get("selection").unwrap_or_else(|| accent.clone());
+    let shadow = get("color8").unwrap_or_else(|| source_background.clone());
+    Some(ThemeTokens {
+        name: title_case_slug(name),
+        background: blend(&source_background, &shadow, 0.35),
+        surface: blend(&source_background, &shadow, 0.65),
+        muted: blend(&shadow, &text, 0.10),
+        highlight: blend(&shadow, &selection, 0.10),
+        border: blend(&shadow, &text, 0.36),
+        dim_text: blend(&source_background, &text, 0.62),
+        text,
+        accent,
+    })
+}
+
+fn validate_tokens(tokens: &ThemeTokens) -> Result<(), &'static str> {
+    if tokens.name.trim().is_empty() {
+        return Err("Enter a theme name");
+    }
+    for color in [
+        &tokens.background,
+        &tokens.surface,
+        &tokens.text,
+        &tokens.accent,
+        &tokens.muted,
+        &tokens.highlight,
+        &tokens.border,
+        &tokens.dim_text,
+    ] {
+        if gdk::RGBA::parse(color).is_err() {
+            return Err("Every color must be a valid CSS color");
+        }
+    }
+    Ok(())
+}
+
+fn tokens_css(tokens: &ThemeTokens) -> String {
+    format!(
+        "@define-color theme_bg {};\n@define-color theme_surface {};\n@define-color theme_text {};\n@define-color theme_accent {};\n@define-color theme_muted {};\n@define-color theme_highlight {};\n@define-color theme_border {};\n@define-color theme_dim_text {};\n",
+        tokens.background,
+        tokens.surface,
+        tokens.text,
+        tokens.accent,
+        tokens.muted,
+        tokens.highlight,
+        tokens.border,
+        tokens.dim_text,
+    )
+}
+
+fn blend(left: &str, right: &str, amount: f64) -> String {
+    let parse = |value: &str| u32::from_str_radix(value.trim_start_matches('#'), 16).ok();
+    let (Some(left), Some(right)) = (parse(left), parse(right)) else {
+        return right.to_owned();
+    };
+    let channel = |shift| {
+        let a = f64::from((left >> shift) & 0xff_u32);
+        let b = f64::from((right >> shift) & 0xff_u32);
+        (a + (b - a) * amount).round() as u32
+    };
+    format!("#{:02x}{:02x}{:02x}", channel(16), channel(8), channel(0))
+}
+
+fn slugify(name: &str) -> String {
+    name.trim()
+        .to_lowercase()
+        .chars()
+        .fold(String::new(), |mut slug, character| {
+            if character.is_ascii_alphanumeric() {
+                slug.push(character);
+            } else if !slug.is_empty() && !slug.ends_with('-') {
+                slug.push('-');
+            }
+            slug
+        })
+        .trim_end_matches('-')
+        .to_owned()
+}
+
+fn title_case_slug(slug: &str) -> String {
+    slug.split('-')
+        .filter(|part| !part.is_empty())
+        .map(|part| {
+            let mut chars = part.chars();
+            chars
+                .next()
+                .map(|first| first.to_uppercase().collect::<String>() + chars.as_str())
+                .unwrap_or_default()
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn config_directory() -> PathBuf {
+    gtk::glib::user_config_dir().join("strata")
+}
+fn settings_path() -> PathBuf {
+    config_directory().join("settings.toml")
+}
+fn themes_directory() -> PathBuf {
+    config_directory().join("themes")
+}
+fn omarchy_state_dir() -> PathBuf {
+    gtk::glib::home_dir().join(".local/state/omarchy/current")
+}
+
+#[cfg(test)]
+mod tests;

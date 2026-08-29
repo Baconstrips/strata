@@ -30,6 +30,11 @@ struct LoadPresentation {
     retry: Option<gtk::Button>,
 }
 
+struct BoundRow {
+    item: glib::WeakRef<gtk::ListItem>,
+    row: glib::WeakRef<gtk::Box>,
+}
+
 #[derive(Clone)]
 struct ColumnView {
     shell: gtk::Box,
@@ -40,6 +45,7 @@ struct ColumnView {
     filter_entry: gtk::Entry,
     selection: gtk::SingleSelection,
     list: gtk::ListView,
+    bound_rows: Rc<RefCell<Vec<BoundRow>>>,
     entry_count: Rc<Cell<usize>>,
     spinner: gtk::Spinner,
 }
@@ -493,11 +499,8 @@ impl ViewState {
                         column.presentation.show_content();
                     }
                     for insertion in insertions {
-                        let labels: Vec<_> = insertion
-                            .entries
-                            .iter()
-                            .map(|entry| format!("{}{}", entry_prefix(entry), entry.display_name))
-                            .collect();
+                        let labels: Vec<_> =
+                            insertion.entries.iter().map(entry_model_value).collect();
                         let labels: Vec<_> = labels.iter().map(String::as_str).collect();
                         column.model.splice(insertion.position as u32, 0, &labels);
                     }
@@ -512,10 +515,7 @@ impl ViewState {
                     if !entries.is_empty() {
                         column.presentation.show_content();
                     }
-                    let labels: Vec<_> = entries
-                        .iter()
-                        .map(|entry| format!("{}{}", entry_prefix(entry), entry.display_name))
-                        .collect();
+                    let labels: Vec<_> = entries.iter().map(entry_model_value).collect();
                     let labels: Vec<_> = labels.iter().map(String::as_str).collect();
                     column.model.splice(0, column.model.n_items(), &labels);
                     column.entry_count.set(entries.len());
@@ -530,11 +530,7 @@ impl ViewState {
                 if let Some(column) = self.columns.borrow().get(depth) {
                     let mut count = column.entry_count.get();
                     for splice in splices {
-                        let labels: Vec<_> = splice
-                            .entries
-                            .iter()
-                            .map(|entry| format!("{}{}", entry_prefix(entry), entry.display_name))
-                            .collect();
+                        let labels: Vec<_> = splice.entries.iter().map(entry_model_value).collect();
                         let labels: Vec<_> = labels.iter().map(String::as_str).collect();
                         column
                             .model
@@ -652,6 +648,23 @@ impl ViewState {
                 show_error_dialog(&self.overlay, "Unable to open directory", &message);
             }
         }
+        self.refresh_active_path_rows();
+    }
+
+    fn refresh_active_path_rows(&self) {
+        for (depth, column) in self.columns.borrow().iter().enumerate() {
+            let active = self
+                .browser
+                .active_child_position(depth)
+                .and_then(|position| filtered_position_for_source(column, position));
+            column.bound_rows.borrow_mut().retain(|bound| {
+                let (Some(item), Some(row)) = (bound.item.upgrade(), bound.row.upgrade()) else {
+                    return false;
+                };
+                set_active_path_style(&row, active == Some(item.position()));
+                true
+            });
+        }
     }
 
     fn append_column(self: &Rc<Self>, depth: usize, location: &Location) {
@@ -733,7 +746,10 @@ impl ViewState {
                 return false;
             };
             let query = query.borrow();
-            query.is_empty() || item.string().to_lowercase().contains(query.as_str())
+            query.is_empty()
+                || model_display_name(&item.string())
+                    .to_lowercase()
+                    .contains(query.as_str())
         });
         let filtered_model = gtk::FilterListModel::new(Some(model.clone()), Some(filter.clone()));
         let selection = gtk::SingleSelection::new(Some(filtered_model.clone()));
@@ -744,6 +760,8 @@ impl ViewState {
         });
 
         let factory = gtk::SignalListItemFactory::new();
+        let bound_rows: Rc<RefCell<Vec<BoundRow>>> = Rc::new(RefCell::new(Vec::new()));
+        let rows_for_setup = bound_rows.clone();
         let weak_state = Rc::downgrade(self);
         let source_for_hover = model.clone();
         let filtered_for_hover = filtered_model.clone();
@@ -753,6 +771,9 @@ impl ViewState {
             };
             let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
             row.add_css_class("file-row");
+            let icon = gtk::Image::new();
+            icon.add_css_class("file-icon");
+            icon.set_pixel_size(17);
             let label = gtk::Label::builder()
                 .halign(gtk::Align::Fill)
                 .xalign(0.0)
@@ -762,8 +783,13 @@ impl ViewState {
             let size = gtk::Label::new(None);
             size.add_css_class("file-size");
             size.set_xalign(1.0);
+            let chevron = gtk::Image::from_icon_name(crate::assets::icons::CHEVRON_RIGHT);
+            chevron.add_css_class("file-chevron");
+            chevron.set_pixel_size(15);
+            row.append(&icon);
             row.append(&label);
             row.append(&size);
+            row.append(&chevron);
             let motion = gtk::EventControllerMotion::new();
             let list_item = item.clone();
             let anchor: gtk::Widget = row.clone().upcast();
@@ -797,6 +823,14 @@ impl ViewState {
             });
             row.add_controller(motion);
             item.set_child(Some(&row));
+            let weak_item = glib::WeakRef::new();
+            weak_item.set(Some(item));
+            let weak_row = glib::WeakRef::new();
+            weak_row.set(Some(&row));
+            rows_for_setup.borrow_mut().push(BoundRow {
+                item: weak_item,
+                row: weak_row,
+            });
         });
         let source_for_bind = model.clone();
         let filtered_for_bind = filtered_model.clone();
@@ -811,27 +845,48 @@ impl ViewState {
             let Some(row) = item.child().and_downcast::<gtk::Box>() else {
                 return;
             };
-            let Some(label) = row.first_child().and_downcast::<gtk::Label>() else {
+            let Some(icon) = row.first_child().and_downcast::<gtk::Image>() else {
                 return;
             };
-            let Some(size) = row.last_child().and_downcast::<gtk::Label>() else {
+            let Some(label) = icon.next_sibling().and_downcast::<gtk::Label>() else {
                 return;
             };
-            label.set_label(&value.string());
-            let size_text =
-                source_position_for_filtered(&source_for_bind, &filtered_for_bind, item.position())
-                    .and_then(|position| {
-                        weak_browser_for_bind
-                            .upgrade()
-                            .and_then(|browser| browser.entry_at(depth, position))
-                    })
-                    .filter(|entry| !entry.is_directory())
-                    .and_then(|entry| match entry.size {
-                        crate::model::MetadataValue::Known(bytes) => Some(format_file_size(bytes)),
-                        crate::model::MetadataValue::Unknown
-                        | crate::model::MetadataValue::Unavailable => None,
-                    })
-                    .unwrap_or_default();
+            let Some(size) = label.next_sibling().and_downcast::<gtk::Label>() else {
+                return;
+            };
+            let Some(chevron) = size.next_sibling().and_downcast::<gtk::Image>() else {
+                return;
+            };
+            label.set_label(model_display_name(&value.string()));
+            let source_position =
+                source_position_for_filtered(&source_for_bind, &filtered_for_bind, item.position());
+            let browser = weak_browser_for_bind.upgrade();
+            let entry =
+                source_position.and_then(|position| browser.as_ref()?.entry_at(depth, position));
+            let active = source_position.is_some_and(|position| {
+                browser
+                    .as_ref()
+                    .and_then(|browser| browser.active_child_position(depth))
+                    == Some(position)
+            });
+            set_active_path_style(&row, active);
+            if let Some(entry) = entry.as_ref() {
+                icon.set_icon_name(Some(entry_icon(entry)));
+                icon.set_opacity(if entry.is_directory() { 1.0 } else { 0.72 });
+                chevron.set_visible(entry.is_directory());
+            } else {
+                icon.set_icon_name(Some(crate::assets::icons::DOCUMENTS));
+                icon.set_opacity(0.72);
+                chevron.set_visible(false);
+            }
+            let size_text = entry
+                .filter(|entry| !entry.is_directory())
+                .and_then(|entry| match entry.size {
+                    crate::model::MetadataValue::Known(bytes) => Some(format_file_size(bytes)),
+                    crate::model::MetadataValue::Unknown
+                    | crate::model::MetadataValue::Unavailable => None,
+                })
+                .unwrap_or_default();
             size.set_label(&size_text);
         });
 
@@ -893,10 +948,12 @@ impl ViewState {
             filter_entry,
             selection,
             list,
+            bound_rows,
             entry_count,
             spinner,
         });
 
+        self.refresh_active_path_rows();
         animate_column_entry(&shell, &column, &animation_generation);
         self.reveal_column(shell);
     }
@@ -1138,12 +1195,22 @@ fn basic_label_factory() -> gtk::SignalListItemFactory {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
+        let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        let icon = gtk::Image::new();
+        icon.add_css_class("file-icon");
+        icon.set_pixel_size(17);
         let label = gtk::Label::builder()
             .halign(gtk::Align::Start)
             .hexpand(true)
             .ellipsize(gtk::pango::EllipsizeMode::End)
             .build();
-        item.set_child(Some(&label));
+        let chevron = gtk::Image::from_icon_name(crate::assets::icons::CHEVRON_RIGHT);
+        chevron.add_css_class("file-chevron");
+        chevron.set_pixel_size(15);
+        row.append(&icon);
+        row.append(&label);
+        row.append(&chevron);
+        item.set_child(Some(&row));
     });
     factory.connect_bind(|_, item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
@@ -1152,10 +1219,29 @@ fn basic_label_factory() -> gtk::SignalListItemFactory {
         let Some(value) = item.item().and_downcast::<gtk::StringObject>() else {
             return;
         };
-        let Some(label) = item.child().and_downcast::<gtk::Label>() else {
+        let Some(row) = item.child().and_downcast::<gtk::Box>() else {
             return;
         };
-        label.set_label(&value.string());
+        let Some(icon) = row.first_child().and_downcast::<gtk::Image>() else {
+            return;
+        };
+        let Some(label) = icon.next_sibling().and_downcast::<gtk::Label>() else {
+            return;
+        };
+        let Some(chevron) = label.next_sibling().and_downcast::<gtk::Image>() else {
+            return;
+        };
+        let value = value.string();
+        let name = model_display_name(&value);
+        let directory = model_is_directory(&value);
+        label.set_label(name);
+        icon.set_icon_name(Some(if directory {
+            crate::assets::icons::FOLDER
+        } else {
+            icon_for_name(name)
+        }));
+        icon.set_opacity(if directory { 1.0 } else { 0.72 });
+        chevron.set_visible(directory);
     });
     factory
 }
@@ -1330,17 +1416,63 @@ fn is_breadcrumb_target(mut target: gtk::Widget) -> bool {
     }
 }
 
-fn entry_prefix(entry: &FileEntry) -> &'static str {
-    if entry.is_broken_symbolic_link() {
-        "×  "
-    } else if entry.is_directory() && entry.is_symbolic_link() {
-        "▸↗ "
-    } else if entry.is_directory() {
-        "▸  "
-    } else if entry.is_symbolic_link() {
-        " ↗ "
+fn set_active_path_style(row: &gtk::Box, active: bool) {
+    if active {
+        row.add_css_class("active-path");
     } else {
-        "   "
+        row.remove_css_class("active-path");
+    }
+}
+
+fn entry_model_value(entry: &FileEntry) -> String {
+    let kind = if entry.is_broken_symbolic_link() {
+        'x'
+    } else if entry.is_directory() {
+        'd'
+    } else if entry.is_symbolic_link() {
+        's'
+    } else {
+        'f'
+    };
+    format!("{kind}\t{}", entry.display_name)
+}
+
+fn model_display_name(value: &str) -> &str {
+    value.split_once('\t').map_or(value, |(_, name)| name)
+}
+
+fn model_is_directory(value: &str) -> bool {
+    value.starts_with("d\t")
+}
+
+fn entry_icon(entry: &FileEntry) -> &'static str {
+    if entry.is_broken_symbolic_link() {
+        return crate::assets::icons::X;
+    }
+    if entry.is_directory() {
+        return crate::assets::icons::FOLDER;
+    }
+    icon_for_name(&entry.display_name)
+}
+
+fn icon_for_name(name: &str) -> &'static str {
+    let extension = name
+        .rsplit_once('.')
+        .map(|(_, extension)| extension.to_ascii_lowercase());
+    match extension.as_deref() {
+        Some("sh" | "bash" | "zsh" | "fish") => crate::assets::icons::TERMINAL,
+        Some("png" | "jpg" | "jpeg" | "gif" | "webp" | "svg" | "bmp" | "avif") => {
+            crate::assets::icons::PICTURES
+        }
+        Some("mp4" | "mkv" | "webm" | "mov" | "avi" | "m4v") => crate::assets::icons::VIDEOS,
+        Some("zip" | "tar" | "gz" | "bz2" | "xz" | "7z" | "rar" | "zst") => {
+            crate::assets::icons::FILE_ARCHIVE
+        }
+        Some(
+            "rs" | "c" | "h" | "cpp" | "go" | "py" | "rb" | "java" | "js" | "jsx" | "ts" | "tsx"
+            | "lua" | "php" | "html" | "css" | "scss" | "json",
+        ) => crate::assets::icons::FILE_CODE,
+        _ => crate::assets::icons::DOCUMENTS,
     }
 }
 
@@ -1355,7 +1487,7 @@ fn append_entries(
         .unwrap_or(entries.len());
     let mut appended = 0;
     for entry in entries.into_iter().take(remaining) {
-        model.append(&format!("{}{}", entry_prefix(&entry), entry.display_name));
+        model.append(&entry_model_value(&entry));
         appended += 1;
     }
     stored_count.set(stored_count.get() + appended);

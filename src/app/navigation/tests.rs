@@ -28,6 +28,26 @@ fn named_entry(path: &str, name: &str) -> FileEntry {
 }
 
 #[test]
+fn active_path_is_independent_from_the_parent_highlight() {
+    let mut state = NavigationState::default();
+    state.navigate(location("/fixture"), RequestId(1));
+    state.apply_batch(
+        RequestId(1),
+        vec![
+            named_entry("/fixture/active", "active"),
+            named_entry("/fixture/hovered", "hovered"),
+        ],
+    );
+    assert!(state.select(0, 0));
+    assert!(state.descend(0, location("/fixture/active"), RequestId(2)));
+
+    assert!(state.select(0, 1));
+
+    assert_eq!(state.active_child_position(0), Some(0));
+    assert_eq!(state.columns[0].selected, Some(1));
+}
+
+#[test]
 fn monitor_insertions_follow_the_active_sort_order() {
     let mut state = NavigationState::default();
     let watched = location("/home");

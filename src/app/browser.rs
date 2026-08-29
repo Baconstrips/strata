@@ -138,7 +138,8 @@ impl Browser {
     }
 
     pub fn focus_active(&self) {
-        if let Some((depth, position)) = self.state.borrow().active_focus() {
+        let focus = self.state.borrow().active_focus();
+        if let Some((depth, position)) = focus {
             self.emit(BrowserEvent::FocusChanged { depth, position });
         }
     }
@@ -352,7 +353,8 @@ impl Browser {
     }
 
     pub fn select(&self, depth: usize, position: usize) {
-        if self.state.borrow_mut().select(depth, position) {
+        let selected = self.state.borrow_mut().select(depth, position);
+        if selected {
             self.emit(BrowserEvent::FocusChanged {
                 depth,
                 position: Some(position),
@@ -364,13 +366,18 @@ impl Browser {
         self.state.borrow().entry_at(depth, position)
     }
 
+    pub fn active_child_position(&self, depth: usize) -> Option<usize> {
+        self.state.borrow().active_child_position(depth)
+    }
+
     pub fn activate(self: &Rc<Self>, depth: usize, position: usize) {
         self.select(depth, position);
         self.activate_focused();
     }
 
     pub fn move_selection(&self, direction: i32) {
-        if let Some((depth, position)) = self.state.borrow_mut().move_selection(direction) {
+        let moved = self.state.borrow_mut().move_selection(direction);
+        if let Some((depth, position)) = moved {
             self.emit(BrowserEvent::FocusChanged {
                 depth,
                 position: Some(position),
@@ -379,7 +386,8 @@ impl Browser {
     }
 
     pub fn focus_parent(&self) {
-        if let Some((depth, position)) = self.state.borrow_mut().focus_parent() {
+        let focus = self.state.borrow_mut().focus_parent();
+        if let Some((depth, position)) = focus {
             self.emit(BrowserEvent::FocusChanged { depth, position });
         }
     }
