@@ -18,9 +18,9 @@ use crate::{
     },
 };
 
-const DEFAULT_WIDTH: i32 = 384;
+const DEFAULT_WIDTH: i32 = 520;
 const MIN_WIDTH: i32 = 280;
-const MAX_WIDTH: i32 = 720;
+const MAX_WIDTH: i32 = 3_000;
 const TEXT_BYTE_LIMIT: usize = 1024 * 1024;
 const TRANSITION: Duration = Duration::from_millis(260);
 const PDF_PAGE_GAP: i32 = 6;
@@ -37,13 +37,14 @@ struct PreviewState {
     content_type: gtk::Label,
     content: gtk::Box,
     split: RefCell<Option<gtk::Paned>>,
+    occupied_width: RefCell<Option<Rc<dyn Fn() -> i32>>>,
     current: RefCell<Option<FileEntry>>,
     load: RefCell<Option<LoadHandle>>,
     pdf_loads: Rc<RefCell<HashMap<i32, LoadHandle>>>,
     current_request: Cell<Option<PreviewRequestId>>,
     next_request: Cell<u64>,
     opened: Cell<bool>,
-    width: Cell<i32>,
+    last_split_width: Cell<i32>,
     animating: Cell<bool>,
     animation_generation: Rc<Cell<u64>>,
 }
@@ -71,6 +72,7 @@ impl PreviewDrawer {
         title.set_xalign(0.0);
         let close = gtk::Button::builder()
             .tooltip_text("Close preview (Space)")
+            .valign(gtk::Align::Center)
             .build();
         close.set_child(Some(&crate::assets::primary_icon(
             crate::assets::icons::X,
@@ -114,13 +116,14 @@ impl PreviewDrawer {
             content_type,
             content,
             split: RefCell::new(None),
+            occupied_width: RefCell::new(None),
             current: RefCell::new(None),
             load: RefCell::new(None),
             pdf_loads: Rc::new(RefCell::new(HashMap::new())),
             current_request: Cell::new(None),
             next_request: Cell::new(1),
             opened: Cell::new(false),
-            width: Cell::new(DEFAULT_WIDTH),
+            last_split_width: Cell::new(0),
             animating: Cell::new(false),
             animation_generation: Rc::new(Cell::new(0)),
         });
@@ -138,22 +141,24 @@ impl PreviewDrawer {
         self.state.revealer.clone().upcast()
     }
 
-    pub fn attach_split(&self, split: &gtk::Paned) {
+    pub fn attach_split(&self, split: &gtk::Paned, occupied_width: Rc<dyn Fn() -> i32>) {
         self.state.split.replace(Some(split.clone()));
+        self.state.occupied_width.replace(Some(occupied_width));
         let weak = Rc::downgrade(&self.state);
-        split.connect_position_notify(move |split| {
+        split.add_tick_callback(move |split, _| {
             let Some(state) = weak.upgrade() else {
-                return;
+                return glib::ControlFlow::Break;
             };
-            if state.opened.get() && !state.animating.get() {
-                let available = split.width();
-                let width = available.saturating_sub(split.position());
-                let bounded = width.clamp(MIN_WIDTH, MAX_WIDTH);
-                state.width.set(bounded);
-                if width != bounded {
-                    split.set_position(available.saturating_sub(bounded));
-                }
+            let available = split.width();
+            if available > 0
+                && available != state.last_split_width.replace(available)
+                && state.opened.get()
+                && !state.animating.get()
+            {
+                let opening_width = state.opening_width(available);
+                split.set_position(available.saturating_sub(opening_width));
             }
+            glib::ControlFlow::Continue
         });
     }
 
@@ -200,7 +205,8 @@ impl PreviewState {
         if available <= MIN_WIDTH {
             return;
         }
-        let target = available.saturating_sub(self.width.get().clamp(MIN_WIDTH, MAX_WIDTH));
+        self.last_split_width.set(available);
+        let target = available.saturating_sub(self.opening_width(available));
         let start = available;
         split.set_position(start);
         let animation_id = self.animation_generation.get().saturating_add(1);
@@ -239,6 +245,18 @@ impl PreviewState {
                 glib::ControlFlow::Continue
             }
         });
+    }
+
+    fn opening_width(&self, available: i32) -> i32 {
+        let occupied_width = self
+            .occupied_width
+            .borrow()
+            .as_ref()
+            .map_or(available.saturating_sub(DEFAULT_WIDTH), |width| width())
+            .clamp(0, available);
+        let desired_width = preview_width_for_empty_space(available, occupied_width);
+        let maximum_width = MAX_WIDTH.min(available.saturating_sub(MIN_WIDTH).max(MIN_WIDTH));
+        desired_width.clamp(MIN_WIDTH, maximum_width)
     }
 
     fn close(self: &Rc<Self>) {
@@ -715,6 +733,14 @@ fn set_pdf_page_texture(
     };
     picture.set_paintable(Some(&texture));
     resize_pdf_page(overlay, picture, target_width);
+}
+
+fn preview_width_for_empty_space(available: i32, occupied: i32) -> i32 {
+    available
+        .saturating_sub(occupied)
+        .saturating_mul(9)
+        .saturating_div(10)
+        .max(MIN_WIDTH)
 }
 
 fn pdf_zoom_after_scroll(current: f64, dy: f64) -> f64 {

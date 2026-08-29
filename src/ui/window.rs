@@ -144,7 +144,12 @@ pub fn present_location(application: &gtk::Application, location: Option<PathBuf
     preview_split.set_end_child(Some(&preview.widget()));
     preview_split.set_position(i32::MAX);
     preview_split.set_vexpand(true);
-    preview.attach_split(&preview_split);
+    let measured_content = content.clone();
+    let measured_browser = browser.clone();
+    preview.attach_split(
+        &preview_split,
+        Rc::new(move || measured_content.position() + measured_browser.occupied_width()),
+    );
     root.append(&preview_split);
 
     let window_overlay = gtk::Overlay::new();

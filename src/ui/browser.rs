@@ -334,6 +334,10 @@ impl BrowserView {
         self.state.browser.clone()
     }
 
+    pub fn occupied_width(&self) -> i32 {
+        (self.state.columns.borrow().len() as i32).saturating_mul(COLUMN_WIDTH)
+    }
+
     pub fn location_widget(&self) -> gtk::Widget {
         self.state.location_stack.clone().upcast()
     }

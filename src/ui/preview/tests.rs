@@ -1,12 +1,21 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use super::{PDF_MAX_ZOOM, PDF_MIN_ZOOM, format_file_size, pdf_zoom_after_scroll};
+use super::{
+    PDF_MAX_ZOOM, PDF_MIN_ZOOM, format_file_size, pdf_zoom_after_scroll,
+    preview_width_for_empty_space,
+};
 
 #[test]
 fn formats_preview_file_sizes() {
     assert_eq!(format_file_size(999), "999 B");
     assert_eq!(format_file_size(1_200), "1.2 kB");
     assert_eq!(format_file_size(2_500_000), "2.5 MB");
+}
+
+#[test]
+fn initial_preview_uses_most_of_the_unoccupied_width() {
+    assert_eq!(preview_width_for_empty_space(2_000, 500), 1_350);
+    assert_eq!(preview_width_for_empty_space(700, 650), 280);
 }
 
 #[test]
