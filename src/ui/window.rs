@@ -283,10 +283,13 @@ fn install_keyboard_navigation(
         if key == gtk::gdk::Key::F2 && view.begin_rename() {
             return glib::Propagation::Stop;
         }
+        if key == gtk::gdk::Key::Escape && view.cancel_new_folder() {
+            return glib::Propagation::Stop;
+        }
         if key == gtk::gdk::Key::Escape && view.cancel_rename() {
             return glib::Propagation::Stop;
         }
-        if view.rename_is_active() {
+        if view.rename_is_active() || view.new_folder_is_active() {
             return glib::Propagation::Proceed;
         }
         if key == gtk::gdk::Key::Escape && view.dismiss_focused_filter() {
@@ -306,6 +309,24 @@ fn install_keyboard_navigation(
                 return glib::Propagation::Stop;
             }
             return glib::Propagation::Proceed;
+        }
+        if control && shift && matches!(key, gtk::gdk::Key::n | gtk::gdk::Key::N) {
+            view.create_new_folder();
+            return glib::Propagation::Stop;
+        }
+        if control && !shift && key == gtk::gdk::Key::v {
+            if view.filter_has_focus() {
+                return glib::Propagation::Proceed;
+            }
+            view.paste();
+            return glib::Propagation::Stop;
+        }
+        if control && !shift && key == gtk::gdk::Key::a {
+            if view.filter_has_focus() {
+                return glib::Propagation::Proceed;
+            }
+            view.select_all();
+            return glib::Propagation::Stop;
         }
         if control && key == gtk::gdk::Key::h {
             browser.toggle_hidden();

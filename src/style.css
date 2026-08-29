@@ -528,11 +528,11 @@ paned > separator {
 
 .column-resize-handle {
   background: transparent;
-  border-left: 1px solid alpha(@theme_border, 0.6);
+  border-right: 1px solid alpha(@theme_border, 0.6);
 }
 
 .column-resize-handle:hover {
-  border-left-color: @theme_accent;
+  border-right-color: @theme_accent;
 }
 
 .peek-popover {
@@ -650,6 +650,68 @@ menubutton.column-header-action > button:checked image {
 .column-menu-option:hover {
   background: alpha(@theme_muted, 0.5);
   color: @theme_text;
+}
+
+.folder-context-popover contents {
+  background: @theme_surface;
+  border: 1px solid alpha(@theme_accent, 0.24);
+  border-radius: 7px;
+  box-shadow: 0 8px 28px alpha(@theme_bg, 0.72);
+  color: @theme_text;
+  padding: 0;
+}
+
+.folder-context-menu {
+  min-width: 230px;
+  padding: 7px;
+}
+
+.folder-context-menu separator {
+  background: alpha(@theme_border, 0.22);
+  margin: 5px 2px;
+  min-height: 1px;
+}
+
+.folder-context-option {
+  background: transparent;
+  border: none;
+  border-radius: 5px;
+  box-shadow: none;
+  color: @theme_text;
+  min-height: 30px;
+  outline: none;
+  padding: 3px 8px;
+}
+
+.folder-context-option:hover {
+  background: alpha(@theme_muted, 0.52);
+  color: @theme_text;
+}
+
+.folder-context-option:active {
+  background: alpha(@theme_muted, 0.78);
+}
+
+.folder-context-option:disabled {
+  color: @theme_dim_text;
+  opacity: 0.48;
+}
+
+.folder-context-shortcut {
+  color: @theme_dim_text;
+  font-size: 0.88em;
+}
+
+.new-folder-row {
+  background: alpha(@theme_muted, 0.24);
+  border-radius: 6px;
+  color: @theme_text;
+  margin: 1px 8px;
+  padding: 4px;
+}
+
+.new-folder-row .file-icon {
+  color: @theme_accent;
 }
 
 .file-list {

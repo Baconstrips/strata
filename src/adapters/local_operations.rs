@@ -4,7 +4,20 @@ use std::rc::Rc;
 
 use gtk::{gio, glib, prelude::*};
 
-use crate::services::{LoadHandle, OperationEvent, OperationProvider, RenameRequest};
+use crate::{
+    model::Location,
+    services::{
+        CreateDirectoryRequest, LoadHandle, OperationEvent, OperationProvider, PasteRequest,
+        RenameRequest,
+    },
+};
+
+fn gio_file(location: &Location) -> gio::File {
+    location
+        .native_path()
+        .map(gio::File::for_path)
+        .unwrap_or_else(|| gio::File::for_uri(location.uri_value().unwrap_or_default()))
+}
 
 #[derive(Default)]
 pub struct LocalOperationProvider;
@@ -32,6 +45,56 @@ impl OperationProvider for LocalOperationProvider {
                     message: error.to_string(),
                 }),
             }
+        });
+        LoadHandle::new(move || task.abort())
+    }
+
+    fn create_directory(
+        &self,
+        request: CreateDirectoryRequest,
+        emit: Rc<dyn Fn(OperationEvent)>,
+    ) -> LoadHandle {
+        let task = glib::MainContext::default().spawn_local(async move {
+            let folder = gio_file(&request.parent).child(&request.name);
+            match folder.make_directory_future(glib::Priority::DEFAULT).await {
+                Ok(()) => emit(OperationEvent::Created {
+                    request_id: request.id,
+                }),
+                Err(error) => emit(OperationEvent::Failed {
+                    request_id: request.id,
+                    message: error.to_string(),
+                }),
+            }
+        });
+        LoadHandle::new(move || task.abort())
+    }
+
+    fn paste(&self, request: PasteRequest, emit: Rc<dyn Fn(OperationEvent)>) -> LoadHandle {
+        let task = glib::MainContext::default().spawn_local(async move {
+            let destination = gio_file(&request.destination);
+            for source in &request.sources {
+                let source = gio_file(source);
+                let Some(name) = source.basename() else {
+                    emit(OperationEvent::Failed {
+                        request_id: request.id,
+                        message: "A clipboard item has no file name".to_owned(),
+                    });
+                    return;
+                };
+                let target = destination.child(name);
+                let (copy, _progress) =
+                    source.copy_future(&target, gio::FileCopyFlags::NONE, glib::Priority::DEFAULT);
+                if let Err(error) = copy.await {
+                    emit(OperationEvent::Failed {
+                        request_id: request.id,
+                        message: error.to_string(),
+                    });
+                    return;
+                }
+            }
+            emit(OperationEvent::Pasted {
+                request_id: request.id,
+            });
         });
         LoadHandle::new(move || task.abort())
     }

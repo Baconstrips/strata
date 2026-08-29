@@ -10,9 +10,9 @@ use crate::{
     app::navigation::{EntryInsertion, EntrySplice, NavigationPath, NavigationState},
     model::{FileEntry, Location, SortDirection, SortKey, ViewPreferences},
     services::{
-        DirectoryChange, DirectoryEvent, DirectoryRequest, FileSource, LoadHandle,
-        LocationValidationError, OperationEvent, OperationProvider, OperationRequestId,
-        RenameRequest, RequestId,
+        CreateDirectoryRequest, DirectoryChange, DirectoryEvent, DirectoryRequest, FileSource,
+        LoadHandle, LocationValidationError, OperationEvent, OperationProvider, OperationRequestId,
+        PasteRequest, RenameRequest, RequestId,
     },
 };
 
@@ -77,6 +77,9 @@ pub enum BrowserEvent {
     },
     RenameCompleted,
     RenameFailed {
+        message: String,
+    },
+    OperationFailed {
         message: String,
     },
     NavigationRejected {
@@ -154,6 +157,14 @@ impl Browser {
 
     pub fn active_location(&self) -> Option<Location> {
         self.state.borrow().active_location()
+    }
+
+    pub fn active_depth(&self) -> Option<usize> {
+        self.state.borrow().active_depth()
+    }
+
+    pub fn location_at(&self, depth: usize) -> Option<Location> {
+        self.state.borrow().location_at(depth)
     }
 
     pub fn focus_active(&self) {
@@ -393,6 +404,17 @@ impl Browser {
         self.state.borrow().focused_entry()
     }
 
+    pub fn rename_item(&self) -> Option<(usize, usize, FileEntry)> {
+        let state = self.state.borrow();
+        if let Some(focused) = state.focused_entry() {
+            return Some(focused);
+        }
+        let depth = state.active_depth()?.checked_sub(1)?;
+        let position = state.active_child_position(depth)?;
+        let entry = state.entry_at(depth, position)?;
+        Some((depth, position, entry))
+    }
+
     pub fn focused_entry(&self) -> Option<FileEntry> {
         self.focused_item().map(|(_, _, entry)| entry)
     }
@@ -425,32 +447,8 @@ impl Browser {
             });
             return;
         };
-        self.operation_load.borrow_mut().take();
-        let request_id = OperationRequestId(self.next_request.get());
-        self.next_request
-            .set(self.next_request.get().saturating_add(1));
-        self.current_operation.set(Some(request_id));
-        let weak = Rc::downgrade(self);
-        let emit = Rc::new(move |event| {
-            let Some(browser) = weak.upgrade() else {
-                return;
-            };
-            let event_id = match &event {
-                OperationEvent::Renamed { request_id }
-                | OperationEvent::Failed { request_id, .. } => *request_id,
-            };
-            if browser.current_operation.get() != Some(event_id) {
-                return;
-            }
-            browser.current_operation.set(None);
-            browser.operation_load.borrow_mut().take();
-            match event {
-                OperationEvent::Renamed { .. } => browser.emit(BrowserEvent::RenameCompleted),
-                OperationEvent::Failed { message, .. } => {
-                    browser.emit(BrowserEvent::RenameFailed { message });
-                }
-            }
-        });
+        let request_id = self.begin_operation();
+        let emit = self.operation_callback(request_id, true);
         let load = provider.rename(
             RenameRequest {
                 id: request_id,
@@ -460,6 +458,90 @@ impl Browser {
             emit,
         );
         self.operation_load.replace(Some(load));
+    }
+
+    pub fn create_directory(self: &Rc<Self>, parent: Location, name: String) {
+        let Some(provider) = self.operation_provider.borrow().clone() else {
+            self.emit(BrowserEvent::OperationFailed {
+                message: "File operations are unavailable".to_owned(),
+            });
+            return;
+        };
+        let request_id = self.begin_operation();
+        let load = provider.create_directory(
+            CreateDirectoryRequest {
+                id: request_id,
+                parent,
+                name,
+            },
+            self.operation_callback(request_id, false),
+        );
+        self.operation_load.replace(Some(load));
+    }
+
+    pub fn paste(self: &Rc<Self>, destination: Location, sources: Vec<Location>) {
+        if sources.is_empty() {
+            return;
+        }
+        let Some(provider) = self.operation_provider.borrow().clone() else {
+            self.emit(BrowserEvent::OperationFailed {
+                message: "File operations are unavailable".to_owned(),
+            });
+            return;
+        };
+        let request_id = self.begin_operation();
+        let load = provider.paste(
+            PasteRequest {
+                id: request_id,
+                destination,
+                sources,
+            },
+            self.operation_callback(request_id, false),
+        );
+        self.operation_load.replace(Some(load));
+    }
+
+    fn begin_operation(&self) -> OperationRequestId {
+        self.operation_load.borrow_mut().take();
+        let request_id = OperationRequestId(self.next_request.get());
+        self.next_request
+            .set(self.next_request.get().saturating_add(1));
+        self.current_operation.set(Some(request_id));
+        request_id
+    }
+
+    fn operation_callback(
+        self: &Rc<Self>,
+        request_id: OperationRequestId,
+        rename: bool,
+    ) -> Rc<dyn Fn(OperationEvent)> {
+        let weak = Rc::downgrade(self);
+        Rc::new(move |event| {
+            let Some(browser) = weak.upgrade() else {
+                return;
+            };
+            let event_id = match &event {
+                OperationEvent::Renamed { request_id }
+                | OperationEvent::Created { request_id }
+                | OperationEvent::Pasted { request_id }
+                | OperationEvent::Failed { request_id, .. } => *request_id,
+            };
+            if event_id != request_id || browser.current_operation.get() != Some(event_id) {
+                return;
+            }
+            browser.current_operation.set(None);
+            browser.operation_load.borrow_mut().take();
+            match event {
+                OperationEvent::Failed { message, .. } if rename => {
+                    browser.emit(BrowserEvent::RenameFailed { message });
+                }
+                OperationEvent::Failed { message, .. } => {
+                    browser.emit(BrowserEvent::OperationFailed { message });
+                }
+                OperationEvent::Renamed { .. } => browser.emit(BrowserEvent::RenameCompleted),
+                OperationEvent::Created { .. } | OperationEvent::Pasted { .. } => {}
+            }
+        })
     }
 
     pub fn preview(self: &Rc<Self>, depth: usize, position: usize) {

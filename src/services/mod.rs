@@ -8,7 +8,10 @@ pub use file_source::{
     DirectoryChange, DirectoryEvent, DirectoryRequest, FileSource, LoadHandle,
     LocationValidationError, RequestId,
 };
-pub use operations::{OperationEvent, OperationProvider, OperationRequestId, RenameRequest};
+pub use operations::{
+    CreateDirectoryRequest, OperationEvent, OperationProvider, OperationRequestId, PasteRequest,
+    RenameRequest,
+};
 pub(crate) use preview::content_family;
 pub use preview::{
     Preview, PreviewContent, PreviewEvent, PreviewProvider, PreviewRequest, PreviewRequestId,

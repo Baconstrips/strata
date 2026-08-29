@@ -536,6 +536,18 @@ fn single_click_action_descends_into_directories() {
 }
 
 #[test]
+fn open_folder_remains_the_rename_target_until_its_pane_has_a_selection() {
+    let browser = Browser::new(Rc::new(FakeFileSource));
+    browser.navigate(Location::local("/fixture"));
+
+    browser.preview(0, 0);
+
+    let (depth, position, entry) = browser.rename_item().expect("open folder rename target");
+    assert_eq!((depth, position), (0, 0));
+    assert_eq!(entry.location, Location::local("/fixture/child"));
+}
+
+#[test]
 fn preview_and_open_are_distinct_file_actions() {
     let browser = Browser::new(Rc::new(FilePreviewSource));
     let events = Rc::new(RefCell::new(Vec::new()));

@@ -51,6 +51,8 @@ struct ColumnView {
     bound_rows: Rc<RefCell<Vec<BoundRow>>>,
     entry_count: Rc<Cell<usize>>,
     spinner: gtk::Spinner,
+    new_folder_row: gtk::Box,
+    new_folder_entry: gtk::Entry,
 }
 
 struct ActiveRename {
@@ -58,6 +60,12 @@ struct ActiveRename {
     field: gtk::Entry,
     label: gtk::Label,
     spacer: gtk::Box,
+}
+
+struct ActiveNewFolder {
+    location: Location,
+    row: gtk::Box,
+    field: gtk::Entry,
 }
 
 struct PeekView {
@@ -183,6 +191,7 @@ struct ViewState {
     peek_behavior: PeekBehavior,
     peek_enabled: Cell<bool>,
     active_rename: RefCell<Option<ActiveRename>>,
+    active_new_folder: RefCell<Option<ActiveNewFolder>>,
     browser: Rc<Browser>,
 }
 
@@ -282,6 +291,7 @@ impl BrowserView {
             peek_behavior,
             peek_enabled: Cell::new(true),
             active_rename: RefCell::new(None),
+            active_new_folder: RefCell::new(None),
             browser,
         });
 
@@ -355,8 +365,16 @@ impl BrowserView {
         self.state.cancel_rename()
     }
 
+    pub fn cancel_new_folder(&self) -> bool {
+        self.state.cancel_new_folder()
+    }
+
     pub fn rename_is_active(&self) -> bool {
         self.state.active_rename.borrow().is_some()
+    }
+
+    pub fn new_folder_is_active(&self) -> bool {
+        self.state.active_new_folder.borrow().is_some()
     }
 
     pub fn occupied_width(&self) -> i32 {
@@ -400,6 +418,41 @@ impl BrowserView {
         }
     }
 
+    pub fn create_new_folder(&self) {
+        let depth = self
+            .state
+            .focused_column_depth()
+            .or_else(|| self.state.browser.active_depth());
+        if let Some((depth, location)) = depth.and_then(|depth| {
+            self.state
+                .browser
+                .location_at(depth)
+                .map(|location| (depth, location))
+        }) {
+            self.state.begin_new_folder(depth, location);
+        }
+    }
+
+    pub fn paste(&self) {
+        if let Some(location) = self.state.browser.active_location() {
+            self.state.paste_into(location);
+        }
+    }
+
+    pub fn select_all(&self) {
+        if let Some(depth) = self.state.columns.borrow().len().checked_sub(1) {
+            self.state.select_all(depth);
+        }
+    }
+
+    pub fn filter_has_focus(&self) -> bool {
+        self.state
+            .columns
+            .borrow()
+            .iter()
+            .any(|column| column.filter_entry.has_focus())
+    }
+
     pub fn dismiss_focused_filter(&self) -> bool {
         let focused = self.state.overlay.root().and_then(|root| root.focus());
         let columns = self.state.columns.borrow();
@@ -419,8 +472,132 @@ impl BrowserView {
 }
 
 impl ViewState {
+    fn focused_column_depth(&self) -> Option<usize> {
+        let focused = self.overlay.root()?.focus()?;
+        self.columns.borrow().iter().position(|column| {
+            focused == column.shell.clone().upcast::<gtk::Widget>()
+                || focused.is_ancestor(&column.shell)
+        })
+    }
+
+    fn select_all(&self, depth: usize) {
+        if let Some(column) = self.columns.borrow().get(depth) {
+            column.selection.select_all();
+            column.list.grab_focus();
+        }
+    }
+
+    fn begin_new_folder(self: &Rc<Self>, depth: usize, location: Location) {
+        self.cancel_new_folder();
+        self.cancel_rename();
+        let columns = self.columns.borrow();
+        let Some(column) = columns.get(depth) else {
+            return;
+        };
+        column.new_folder_entry.remove_css_class("error");
+        column.new_folder_entry.set_tooltip_text(None);
+        column.new_folder_entry.set_text("");
+        column.new_folder_row.set_visible(true);
+        self.active_new_folder.replace(Some(ActiveNewFolder {
+            location,
+            row: column.new_folder_row.clone(),
+            field: column.new_folder_entry.clone(),
+        }));
+        column.new_folder_entry.grab_focus();
+    }
+
+    fn submit_new_folder(self: &Rc<Self>, field: &gtk::Entry) {
+        let Some(active) = self
+            .active_new_folder
+            .take()
+            .filter(|active| active.field == *field)
+        else {
+            return;
+        };
+        active.row.set_visible(false);
+        let name = field.text().to_string();
+        field.set_text("");
+        if !name.is_empty() {
+            self.browser.create_directory(active.location, name);
+        }
+    }
+
+    fn cancel_new_folder(&self) -> bool {
+        let Some(active) = self.active_new_folder.take() else {
+            return false;
+        };
+        active.field.set_text("");
+        active.field.remove_css_class("error");
+        active.field.set_tooltip_text(None);
+        active.row.set_visible(false);
+        true
+    }
+
+    fn paste_into(self: &Rc<Self>, destination: Location) {
+        let Some(display) = gtk::gdk::Display::default() else {
+            return;
+        };
+        let clipboard = display.clipboard();
+        let weak = Rc::downgrade(self);
+        glib::MainContext::default().spawn_local(async move {
+            let result = clipboard
+                .read_value_future(gtk::gdk::FileList::static_type(), glib::Priority::DEFAULT)
+                .await;
+            let files = match result {
+                Ok(value) => match value.get::<gtk::gdk::FileList>() {
+                    Ok(files) => files.files(),
+                    Err(error) => {
+                        if let Some(state) = weak.upgrade() {
+                            show_error_dialog(
+                                &state.overlay,
+                                "Unable to paste",
+                                &format!("The clipboard does not contain files: {error}"),
+                            );
+                        }
+                        return;
+                    }
+                },
+                Err(error) => {
+                    if let Some(state) = weak.upgrade() {
+                        show_error_dialog(
+                            &state.overlay,
+                            "Unable to paste",
+                            &format!("The clipboard does not contain files: {error}"),
+                        );
+                    }
+                    return;
+                }
+            };
+            let sources = files
+                .into_iter()
+                .map(|file| {
+                    file.path()
+                        .map(Location::local)
+                        .unwrap_or_else(|| Location::uri(file.uri()))
+                })
+                .collect();
+            if let Some(state) = weak.upgrade() {
+                state.browser.paste(destination, sources);
+            }
+        });
+    }
+
+    fn show_folder_properties(&self, location: &Location) {
+        let dialog = gtk::AlertDialog::builder()
+            .modal(true)
+            .message(location.display_name())
+            .detail(format!(
+                "Type: Folder\nLocation: {}",
+                location.display_path()
+            ))
+            .build();
+        let window = self.overlay.root().and_downcast::<gtk::Window>();
+        dialog.show(window.as_ref());
+    }
+
     fn begin_rename(&self) -> bool {
-        let Some((depth, source_position, entry)) = self.browser.focused_item() else {
+        self.cancel_new_folder();
+        let Some((depth, source_position, entry)) = self.browser.rename_item() else {
             return false;
         };
         self.cancel_rename();
@@ -824,6 +1001,9 @@ impl ViewState {
                     rename.field.set_tooltip_text(Some(&message));
                     rename.field.grab_focus();
                 }
+            }
+            BrowserEvent::OperationFailed { message } => {
+                show_error_dialog(&self.overlay, "Unable to complete operation", &message);
             }
             BrowserEvent::NavigationRejected { message } => {
                 show_error_dialog(&self.overlay, "Unable to open directory", &message);
@@ -1385,14 +1565,47 @@ impl ViewState {
                 browser.retry_column(depth);
             }
         });
+        let new_folder_row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        new_folder_row.add_css_class("file-row");
+        new_folder_row.add_css_class("new-folder-row");
+        new_folder_row.set_visible(false);
+        let new_folder_icon = crate::assets::primary_icon(crate::assets::icons::FOLDER, 17);
+        new_folder_icon.add_css_class("file-icon");
+        let new_folder_entry = gtk::Entry::new();
+        new_folder_entry.add_css_class("inline-rename");
+        new_folder_entry.set_hexpand(true);
+        new_folder_row.append(&new_folder_icon);
+        new_folder_row.append(&new_folder_entry);
+        let weak_state = Rc::downgrade(self);
+        new_folder_entry.connect_activate(move |field| {
+            if let Some(state) = weak_state.upgrade() {
+                state.submit_new_folder(field);
+            }
+        });
+        let new_folder_focus = gtk::EventControllerFocus::new();
+        let weak_state = Rc::downgrade(self);
+        let field = new_folder_entry.clone();
+        new_folder_focus.connect_leave(move |_| {
+            if let Some(state) = weak_state.upgrade() {
+                state.submit_new_folder(&field);
+            }
+        });
+        new_folder_entry.add_controller(new_folder_focus);
+
         let presentation = LoadPresentation::new(&scroll, Some(retry));
+        install_folder_context_menu(self, &presentation.stack, &list, depth, location.clone());
+        column.append(&new_folder_row);
         column.append(&presentation.stack);
 
         let shell = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         shell.set_size_request(COLUMN_WIDTH, -1);
         shell.set_vexpand(true);
         shell.set_overflow(gtk::Overflow::Hidden);
-        shell.append(&column);
+        let column_overlay = gtk::Overlay::new();
+        column_overlay.set_child(Some(&column));
+        column_overlay.set_hexpand(true);
+        column_overlay.set_vexpand(true);
+        shell.append(&column_overlay);
         let resize_handle = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         resize_handle.add_css_class("column-resize-handle");
         resize_handle.set_width_request(7);
@@ -1426,7 +1639,9 @@ impl ViewState {
                 .set_size_request(resized_column_width(resize_start.get(), offset_x), -1);
         });
         resize_handle.add_controller(resize);
-        shell.append(&resize_handle);
+        resize_handle.set_halign(gtk::Align::End);
+        resize_handle.set_valign(gtk::Align::Fill);
+        column_overlay.add_overlay(&resize_handle);
         let animation_generation = Rc::new(Cell::new(0));
         let previous = depth
             .checked_sub(1)
@@ -1449,6 +1664,8 @@ impl ViewState {
             bound_rows,
             entry_count,
             spinner,
+            new_folder_row,
+            new_folder_entry,
         });
 
         self.refresh_active_path_rows();
@@ -1666,6 +1883,7 @@ impl ViewState {
     fn truncate(self: &Rc<Self>, len: usize) {
         self.close_peek_visual();
         self.cancel_rename();
+        self.cancel_new_folder();
         self.horizontal_scroll_generation
             .set(self.horizontal_scroll_generation.get().saturating_add(1));
         while self.columns.borrow().len() > len {
@@ -1819,6 +2037,139 @@ fn filtered_position_for_source(column: &ColumnView, source_position: usize) -> 
             .item(*position)
             .is_some_and(|candidate| candidate == item)
     })
+}
+
+fn install_folder_context_menu(
+    state: &Rc<ViewState>,
+    parent: &gtk::Stack,
+    list: &gtk::ListView,
+    depth: usize,
+    location: Location,
+) {
+    let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    content.add_css_class("folder-context-menu");
+    let popover = gtk::Popover::builder()
+        .child(&content)
+        .autohide(true)
+        .has_arrow(false)
+        .build();
+    popover.add_css_class("folder-context-popover");
+    popover.set_parent(parent);
+
+    let new_folder = context_menu_option("New Folder", Some("Ctrl+Shift+N"));
+    let paste = context_menu_option("Paste", Some("Ctrl+V"));
+    let select_all = context_menu_option("Select All", Some("Ctrl+A"));
+    let properties = context_menu_option("Properties", None);
+    content.append(&new_folder);
+    content.append(&paste);
+    content.append(&select_all);
+    content.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
+    content.append(&properties);
+
+    let pending_new_folder = Rc::new(Cell::new(false));
+    let pending_for_click = pending_new_folder.clone();
+    let new_folder_popover = popover.downgrade();
+    new_folder.connect_clicked(move |_| {
+        pending_for_click.set(true);
+        if let Some(popover) = new_folder_popover.upgrade() {
+            popover.popdown();
+        }
+    });
+    let weak = Rc::downgrade(state);
+    let folder = location.clone();
+    popover.connect_closed(move |_| {
+        if !pending_new_folder.replace(false) {
+            return;
+        }
+        let weak = weak.clone();
+        let folder = folder.clone();
+        glib::idle_add_local_once(move || {
+            if let Some(state) = weak.upgrade() {
+                state.begin_new_folder(depth, folder);
+            }
+        });
+    });
+    let weak = Rc::downgrade(state);
+    let folder = location.clone();
+    let paste_popover = popover.downgrade();
+    paste.connect_clicked(move |_| {
+        if let Some(popover) = paste_popover.upgrade() {
+            popover.popdown();
+        }
+        if let Some(state) = weak.upgrade() {
+            state.paste_into(folder.clone());
+        }
+    });
+    let weak = Rc::downgrade(state);
+    let select_popover = popover.downgrade();
+    select_all.connect_clicked(move |_| {
+        if let Some(popover) = select_popover.upgrade() {
+            popover.popdown();
+        }
+        if let Some(state) = weak.upgrade() {
+            state.select_all(depth);
+        }
+    });
+    let weak = Rc::downgrade(state);
+    let properties_popover = popover.downgrade();
+    properties.connect_clicked(move |_| {
+        if let Some(popover) = properties_popover.upgrade() {
+            popover.popdown();
+        }
+        if let Some(state) = weak.upgrade() {
+            state.show_folder_properties(&location);
+        }
+    });
+
+    let menu_click = gtk::GestureClick::new();
+    menu_click.set_button(3);
+    let list = list.clone();
+    let weak_popover = popover.downgrade();
+    menu_click.connect_pressed(move |gesture, _, x, y| {
+        let over_row = gesture
+            .widget()
+            .and_then(|widget| widget.pick(x, y, gtk::PickFlags::DEFAULT))
+            .is_some_and(is_file_row_target);
+        if over_row {
+            return;
+        }
+        let Some(popover) = weak_popover.upgrade() else {
+            return;
+        };
+        gesture.set_state(gtk::EventSequenceState::Claimed);
+        paste.set_sensitive(gtk::gdk::Display::default().is_some_and(|display| {
+            display
+                .clipboard()
+                .formats()
+                .contains_type(gtk::gdk::FileList::static_type())
+        }));
+        select_all.set_sensitive(list.model().is_some_and(|model| model.n_items() > 0));
+        popover.set_pointing_to(Some(&gtk::gdk::Rectangle::new(
+            x.round() as i32,
+            y.round() as i32,
+            1,
+            1,
+        )));
+        popover.popup();
+    });
+    parent.add_controller(menu_click);
+}
+
+fn context_menu_option(label: &str, accelerator: Option<&str>) -> gtk::Button {
+    let button = gtk::Button::new();
+    button.add_css_class("folder-context-option");
+    let row = gtk::Box::new(gtk::Orientation::Horizontal, 18);
+    let title = gtk::Label::new(Some(label));
+    title.set_xalign(0.0);
+    title.set_hexpand(true);
+    row.append(&title);
+    if let Some(accelerator) = accelerator {
+        let shortcut = gtk::Label::new(Some(accelerator));
+        shortcut.add_css_class("folder-context-shortcut");
+        row.append(&shortcut);
+    }
+    button.set_child(Some(&row));
+    button
 }
 
 fn column_sort_menu(browser: &Rc<Browser>, depth: usize) -> gtk::MenuButton {
