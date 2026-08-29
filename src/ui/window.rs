@@ -10,15 +10,12 @@ use std::{
 
 use gtk::{gio, glib, prelude::*};
 
-use crate::{
-    adapters::LocalFileSource,
-    app::Browser,
-    model::{Location, SortKey},
-};
+use crate::{adapters::LocalFileSource, app::Browser, model::Location};
 
 use super::{
+    blur::BlurBin,
     browser::{BrowserView, PeekBehavior},
-    motion::{animations_enabled, emphasized_deceleration},
+    motion::{animations_enabled, emphasized_deceleration, set_reduce_motion},
 };
 
 const SIDEBAR_WIDTH: i32 = 208;
@@ -43,6 +40,7 @@ pub fn present_location(application: &gtk::Application, location: Option<PathBuf
     let controller = browser.browser();
 
     let header = gtk::HeaderBar::new();
+    header.set_show_title_buttons(false);
     header.set_title_widget(Some(&gtk::Box::new(gtk::Orientation::Horizontal, 0)));
     let sidebar_toggle = gtk::ToggleButton::builder()
         .icon_name(crate::assets::icons::PANEL_LEFT)
@@ -56,45 +54,27 @@ pub fn present_location(application: &gtk::Application, location: Option<PathBuf
         .icon_name(crate::assets::icons::SEARCH)
         .tooltip_text("Search")
         .build();
-    header.pack_end(&search_button);
-
-    let sort = gtk::DropDown::from_strings(&["Name", "Type", "Size", "Modified"]);
-    sort.set_tooltip_text(Some("Sort directory"));
-    let weak_controller = Rc::downgrade(&controller);
-    sort.connect_selected_notify(move |sort| {
-        let sort_key = match sort.selected() {
-            1 => SortKey::Type,
-            2 => SortKey::Size,
-            3 => SortKey::Modified,
-            _ => SortKey::Name,
-        };
-        if let Some(controller) = weak_controller.upgrade() {
-            controller.set_sort_key(sort_key);
-        }
-    });
-    header.pack_end(&sort);
-
-    let direction = navigation_button("view-sort-ascending-symbolic", "Reverse sort direction");
-    let weak_controller = Rc::downgrade(&controller);
-    direction.connect_clicked(move |_| {
-        if let Some(controller) = weak_controller.upgrade() {
-            controller.toggle_sort_direction();
-        }
-    });
-    header.pack_end(&direction);
-
-    let folders_first = gtk::ToggleButton::builder()
-        .label("Folders first")
-        .active(true)
-        .tooltip_text("Keep folders before files")
+    search_button.add_css_class("header-action");
+    let appearance = build_appearance_menu(&controller);
+    let settings = gtk::Button::builder()
+        .icon_name(crate::assets::icons::SETTINGS)
+        .tooltip_text("Settings")
         .build();
-    let weak_controller = Rc::downgrade(&controller);
-    folders_first.connect_toggled(move |button| {
-        if let Some(controller) = weak_controller.upgrade() {
-            controller.set_folders_first(button.is_active());
-        }
-    });
-    header.pack_end(&folders_first);
+    settings.add_css_class("header-action");
+    let close_window = gtk::Button::builder()
+        .icon_name(crate::assets::icons::X)
+        .tooltip_text("Close window")
+        .build();
+    close_window.add_css_class("header-action");
+    let closing_window = window.clone();
+    close_window.connect_clicked(move |_| closing_window.close());
+    let header_actions = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    header_actions.add_css_class("header-actions");
+    header_actions.append(&search_button);
+    header_actions.append(&appearance);
+    header_actions.append(&settings);
+    header_actions.append(&close_window);
+    header.pack_end(&header_actions);
 
     let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
     root.append(&header);
@@ -121,7 +101,31 @@ pub fn present_location(application: &gtk::Application, location: Option<PathBuf
     });
     root.append(&content);
 
-    window.set_child(Some(&root));
+    let window_overlay = gtk::Overlay::new();
+    let blurred_root = BlurBin::new(&root);
+    window_overlay.set_child(Some(&blurred_root));
+    let settings_layer = build_settings_layer(&browser, &settings, &blurred_root);
+    window_overlay.add_overlay(&settings_layer);
+    let shown_settings = settings_layer.clone();
+    let settings_button = settings.clone();
+    let settings_blurred_root = blurred_root.clone();
+    settings.connect_clicked(move |_| {
+        show_settings(&shown_settings, &settings_button, &settings_blurred_root);
+    });
+    let settings_shortcut = gtk::EventControllerKey::new();
+    let shown_settings = settings_layer.clone();
+    let settings_button = settings.clone();
+    let shortcut_blurred_root = blurred_root.clone();
+    settings_shortcut.connect_key_pressed(move |_, key, _, modifiers| {
+        if key != gtk::gdk::Key::comma || !modifiers.contains(gtk::gdk::ModifierType::CONTROL_MASK)
+        {
+            return glib::Propagation::Proceed;
+        }
+        show_settings(&shown_settings, &settings_button, &shortcut_blurred_root);
+        glib::Propagation::Stop
+    });
+    window.add_controller(settings_shortcut);
+    window.set_child(Some(&window_overlay));
     install_keyboard_navigation(&window, &browser, &sidebar_toggle);
     browser.navigate(location.unwrap_or_else(home_directory));
 
@@ -242,17 +246,249 @@ fn install_keyboard_navigation(
     window.add_controller(keys);
 }
 
-fn navigation_button(icon: &str, tooltip: &str) -> gtk::Button {
-    gtk::Button::builder()
-        .icon_name(icon)
-        .tooltip_text(tooltip)
-        .build()
+fn build_appearance_menu(controller: &Rc<Browser>) -> gtk::MenuButton {
+    let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    content.add_css_class("appearance-menu");
+    append_menu_heading(&content, "VIEW");
+    let (list, _, _) = appearance_option(crate::assets::icons::LIST, "List", true, true);
+    content.append(&list);
+    let (grid, _, _) = appearance_option(crate::assets::icons::GRID, "Grid", false, false);
+    grid.set_tooltip_text(Some("Grid view is planned"));
+    content.append(&grid);
+
+    content.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
+    append_menu_heading(&content, "DENSITY");
+    let (compact, _, _) = appearance_option(crate::assets::icons::ROWS, "Compact", true, true);
+    content.append(&compact);
+    let (airy, _, _) = appearance_option(crate::assets::icons::ROWS, "Airy", false, false);
+    airy.set_tooltip_text(Some("Airy density is planned"));
+    content.append(&airy);
+
+    content.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
+    let (hidden, hidden_check, hidden_icon) =
+        appearance_option(crate::assets::icons::EYE_OFF, "Hidden files", false, true);
+    let hidden_state = Rc::new(Cell::new(false));
+    let weak_controller = Rc::downgrade(controller);
+    hidden.connect_clicked(move |_| {
+        let shown = !hidden_state.get();
+        hidden_state.set(shown);
+        hidden_check.set_visible(shown);
+        hidden_icon.set_icon_name(Some(if shown {
+            crate::assets::icons::EYE
+        } else {
+            crate::assets::icons::EYE_OFF
+        }));
+        if let Some(controller) = weak_controller.upgrade() {
+            controller.toggle_hidden();
+        }
+    });
+    content.append(&hidden);
+
+    let popover = gtk::Popover::builder()
+        .child(&content)
+        .has_arrow(false)
+        .halign(gtk::Align::End)
+        .position(gtk::PositionType::Bottom)
+        .build();
+    popover.add_css_class("appearance-popover");
+    let button = gtk::MenuButton::builder()
+        .icon_name(crate::assets::icons::LIST)
+        .tooltip_text("Appearance")
+        .popover(&popover)
+        .build();
+    button.add_css_class("header-action");
+    button.connect_active_notify(|button| {
+        button.set_icon_name(if button.is_active() {
+            crate::assets::icons::LIST_ACTIVE
+        } else {
+            crate::assets::icons::LIST
+        });
+    });
+    button
+}
+
+fn appearance_option(
+    icon: &str,
+    label: &str,
+    checked: bool,
+    sensitive: bool,
+) -> (gtk::Button, gtk::Image, gtk::Image) {
+    let row = gtk::Box::new(gtk::Orientation::Horizontal, 10);
+    let check = gtk::Image::from_icon_name(crate::assets::icons::CHECK);
+    check.set_pixel_size(16);
+    check.set_visible(checked);
+    let option = gtk::Image::from_icon_name(icon);
+    option.set_pixel_size(17);
+    let label = gtk::Label::new(Some(label));
+    label.set_xalign(0.0);
+    label.set_hexpand(true);
+    row.append(&option);
+    row.append(&label);
+    row.append(&check);
+    let button = gtk::Button::builder()
+        .child(&row)
+        .sensitive(sensitive)
+        .build();
+    button.add_css_class("appearance-option");
+    button.set_has_frame(false);
+    (button, check, option)
+}
+
+fn show_settings(layer: &gtk::Box, button: &gtk::Button, root: &BlurBin) {
+    root.set_blurred(true);
+    layer.set_visible(true);
+    layer.grab_focus();
+    button.set_icon_name(crate::assets::icons::SETTINGS_ACTIVE);
+    button.add_css_class("active");
+}
+
+fn build_settings_layer(
+    browser: &BrowserView,
+    settings_button: &gtk::Button,
+    root: &BlurBin,
+) -> gtk::Box {
+    let layer = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    layer.add_css_class("settings-backdrop");
+    layer.set_halign(gtk::Align::Fill);
+    layer.set_valign(gtk::Align::Fill);
+    layer.set_hexpand(true);
+    layer.set_vexpand(true);
+    layer.set_focusable(true);
+    layer.set_visible(false);
+
+    let panel = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    panel.add_css_class("settings-dialog");
+    panel.set_halign(gtk::Align::Center);
+    panel.set_valign(gtk::Align::Center);
+    panel.set_size_request(760, 500);
+
+    let navigation = gtk::Box::new(gtk::Orientation::Vertical, 8);
+    navigation.add_css_class("settings-navigation");
+    append_menu_heading(&navigation, "SETTINGS");
+    let general = gtk::Button::with_label("General");
+    general.add_css_class("settings-nav-active");
+    general.set_has_frame(false);
+    navigation.append(&general);
+    let keybindings = gtk::Button::with_label("Keybindings");
+    keybindings.set_sensitive(false);
+    keybindings.set_has_frame(false);
+    navigation.append(&keybindings);
+    let theme = gtk::Button::with_label("Theme & appearance");
+    theme.set_sensitive(false);
+    theme.set_has_frame(false);
+    navigation.append(&theme);
+    panel.append(&navigation);
+
+    let page = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    page.add_css_class("settings-page");
+    page.set_hexpand(true);
+    let titlebar = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    titlebar.add_css_class("settings-titlebar");
+    let title = gtk::Label::new(Some("General"));
+    title.set_xalign(0.0);
+    title.set_hexpand(true);
+    title.add_css_class("settings-title");
+    let close = gtk::Button::builder()
+        .icon_name(crate::assets::icons::X)
+        .tooltip_text("Close settings")
+        .build();
+    close.add_css_class("settings-close");
+    titlebar.append(&title);
+    titlebar.append(&close);
+    page.append(&titlebar);
+
+    let preferences = gtk::Box::new(gtk::Orientation::Vertical, 12);
+    preferences.add_css_class("settings-preferences");
+    append_menu_heading(&preferences, "BROWSING");
+    let (peeking_row, peeking) = settings_option(
+        "Folder peeking",
+        "Preview folders automatically while moving through a pane.",
+        true,
+    );
+    let browser = browser.clone();
+    peeking.connect_active_notify(move |toggle| browser.set_peek_enabled(toggle.is_active()));
+    preferences.append(&peeking_row);
+
+    append_menu_heading(&preferences, "MOTION");
+    let (motion_row, reduce_motion) = settings_option(
+        "Reduce motion",
+        "Disable nonessential interface animations.",
+        false,
+    );
+    reduce_motion.connect_active_notify(|toggle| set_reduce_motion(toggle.is_active()));
+    preferences.append(&motion_row);
+    page.append(&preferences);
+    panel.append(&page);
+    let top_spacer = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    top_spacer.set_vexpand(true);
+    let bottom_spacer = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    bottom_spacer.set_vexpand(true);
+    layer.append(&top_spacer);
+    layer.append(&panel);
+    layer.append(&bottom_spacer);
+
+    let hidden_layer = layer.clone();
+    let inactive_settings = settings_button.clone();
+    let unblurred_root = root.clone();
+    close.connect_clicked(move |_| {
+        hidden_layer.set_visible(false);
+        unblurred_root.set_blurred(false);
+        inactive_settings.set_icon_name(crate::assets::icons::SETTINGS);
+        inactive_settings.remove_css_class("active");
+    });
+    let hidden_layer = layer.clone();
+    let inactive_settings = settings_button.clone();
+    let unblurred_root = root.clone();
+    let keys = gtk::EventControllerKey::new();
+    keys.connect_key_pressed(move |_, key, _, _| {
+        if key != gtk::gdk::Key::Escape {
+            return glib::Propagation::Proceed;
+        }
+        hidden_layer.set_visible(false);
+        unblurred_root.set_blurred(false);
+        inactive_settings.set_icon_name(crate::assets::icons::SETTINGS);
+        inactive_settings.remove_css_class("active");
+        glib::Propagation::Stop
+    });
+    layer.add_controller(keys);
+    layer
+}
+
+fn settings_option(title: &str, description: &str, active: bool) -> (gtk::Box, gtk::Switch) {
+    let row = gtk::Box::new(gtk::Orientation::Horizontal, 16);
+    row.add_css_class("settings-option");
+    let copy = gtk::Box::new(gtk::Orientation::Vertical, 2);
+    copy.set_hexpand(true);
+    let title = gtk::Label::new(Some(title));
+    title.set_xalign(0.0);
+    title.add_css_class("settings-option-title");
+    let description = gtk::Label::new(Some(description));
+    description.set_xalign(0.0);
+    description.set_wrap(true);
+    description.add_css_class("settings-option-description");
+    copy.append(&title);
+    copy.append(&description);
+    let toggle = gtk::Switch::builder()
+        .active(active)
+        .valign(gtk::Align::Center)
+        .build();
+    row.append(&copy);
+    row.append(&toggle);
+    (row, toggle)
+}
+
+fn append_menu_heading(container: &gtk::Box, text: &str) {
+    let heading = gtk::Label::new(Some(text));
+    heading.set_xalign(0.0);
+    heading.add_css_class("menu-heading");
+    container.append(&heading);
 }
 
 struct SidebarState {
     widget: gtk::Box,
     browser: Rc<Browser>,
     volume_monitor: gio::VolumeMonitor,
+    place_order: RefCell<Vec<&'static str>>,
 }
 
 struct SidebarView {
@@ -287,35 +523,11 @@ impl SidebarState {
         );
         self.append_separator();
 
-        for (icon, name, directory) in [
-            (
-                crate::assets::icons::FOLDER,
-                "Desktop",
-                glib::UserDirectory::Desktop,
-            ),
-            (
-                crate::assets::icons::DOCUMENTS,
-                "Documents",
-                glib::UserDirectory::Documents,
-            ),
-            (
-                crate::assets::icons::DOWNLOADS,
-                "Downloads",
-                glib::UserDirectory::Downloads,
-            ),
-            (
-                crate::assets::icons::PICTURES,
-                "Pictures",
-                glib::UserDirectory::Pictures,
-            ),
-            (
-                crate::assets::icons::VIDEOS,
-                "Videos",
-                glib::UserDirectory::Videos,
-            ),
-        ] {
-            if let Some(path) = glib::user_special_dir(directory) {
-                self.append_place(icon, name, Location::local(path));
+        for place in self.place_order.borrow().clone() {
+            if let Some((icon, name, directory)) = standard_place(place) {
+                if let Some(path) = glib::user_special_dir(directory) {
+                    self.append_reorderable_place(place, icon, name, Location::local(path));
+                }
             }
         }
 
@@ -342,6 +554,69 @@ impl SidebarState {
             for (name, location) in mounts {
                 self.append_place(crate::assets::icons::HARD_DRIVE, &name, location);
             }
+        }
+    }
+
+    fn append_reorderable_place(
+        self: &Rc<Self>,
+        id: &'static str,
+        icon: &str,
+        name: &str,
+        location: Location,
+    ) {
+        let row = sidebar_button(icon, name);
+        row.add_css_class("reorderable");
+        row.set_cursor_from_name(Some("grab"));
+        row.set_tooltip_text(Some(&location.display_path()));
+        let weak_browser = Rc::downgrade(&self.browser);
+        row.connect_clicked(move |_| {
+            if let Some(browser) = weak_browser.upgrade() {
+                browser.navigate(location.clone());
+            }
+        });
+
+        let drag = gtk::DragSource::builder()
+            .actions(gtk::gdk::DragAction::MOVE)
+            .build();
+        drag.connect_prepare(move |_, _, _| {
+            Some(gtk::gdk::ContentProvider::for_value(
+                &id.to_string().to_value(),
+            ))
+        });
+        let dragged_row = row.clone();
+        drag.connect_drag_begin(move |_, _| {
+            dragged_row.add_css_class("dragging");
+            dragged_row.set_cursor_from_name(Some("grabbing"));
+        });
+        let dragged_row = row.clone();
+        drag.connect_drag_end(move |_, _, _| {
+            dragged_row.remove_css_class("dragging");
+            dragged_row.set_cursor_from_name(Some("grab"));
+        });
+        row.add_controller(drag);
+
+        let drop = gtk::DropTarget::new(String::static_type(), gtk::gdk::DragAction::MOVE);
+        let weak_state = Rc::downgrade(self);
+        let target_row = row.clone();
+        drop.connect_drop(move |_, value, _, y| {
+            let Ok(source) = value.get::<String>() else {
+                return false;
+            };
+            let after = y >= f64::from(target_row.height()) / 2.0;
+            if let Some(state) = weak_state.upgrade() {
+                state.reorder_place(&source, id, after);
+                return true;
+            }
+            false
+        });
+        row.add_controller(drop);
+        self.widget.append(&row);
+    }
+
+    fn reorder_place(self: &Rc<Self>, source: &str, target: &str, after: bool) {
+        let changed = reorder_places(&mut self.place_order.borrow_mut(), source, target, after);
+        if changed {
+            self.rebuild();
         }
     }
 
@@ -405,10 +680,57 @@ impl SidebarState {
     }
 }
 
+fn reorder_places(order: &mut Vec<&'static str>, source: &str, target: &str, after: bool) -> bool {
+    if source == target {
+        return false;
+    }
+    let Some(source_index) = order.iter().position(|place| *place == source) else {
+        return false;
+    };
+    let source = order.remove(source_index);
+    let Some(target_index) = order.iter().position(|place| *place == target) else {
+        order.insert(source_index, source);
+        return false;
+    };
+    order.insert(target_index + usize::from(after), source);
+    true
+}
+
+fn standard_place(id: &str) -> Option<(&'static str, &'static str, glib::UserDirectory)> {
+    match id {
+        "desktop" => Some((
+            crate::assets::icons::FOLDER,
+            "Desktop",
+            glib::UserDirectory::Desktop,
+        )),
+        "documents" => Some((
+            crate::assets::icons::DOCUMENTS,
+            "Documents",
+            glib::UserDirectory::Documents,
+        )),
+        "downloads" => Some((
+            crate::assets::icons::DOWNLOADS,
+            "Downloads",
+            glib::UserDirectory::Downloads,
+        )),
+        "pictures" => Some((
+            crate::assets::icons::PICTURES,
+            "Pictures",
+            glib::UserDirectory::Pictures,
+        )),
+        "videos" => Some((
+            crate::assets::icons::VIDEOS,
+            "Videos",
+            glib::UserDirectory::Videos,
+        )),
+        _ => None,
+    }
+}
+
 fn sidebar_button(icon: &str, name: &str) -> gtk::Button {
-    let content = gtk::Box::new(gtk::Orientation::Horizontal, 10);
+    let content = gtk::Box::new(gtk::Orientation::Horizontal, 8);
     let image = gtk::Image::from_icon_name(icon);
-    image.set_pixel_size(18);
+    image.set_pixel_size(17);
     let label = gtk::Label::new(Some(name));
     label.set_xalign(0.0);
     label.set_hexpand(true);
@@ -448,6 +770,13 @@ fn build_sidebar(browser: Rc<Browser>) -> SidebarView {
         widget,
         browser,
         volume_monitor,
+        place_order: RefCell::new(vec![
+            "desktop",
+            "documents",
+            "downloads",
+            "pictures",
+            "videos",
+        ]),
     });
 
     let mut handlers = Vec::new();
@@ -501,6 +830,9 @@ fn home_directory() -> PathBuf {
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("/"))
 }
+
+#[cfg(test)]
+mod tests;
 
 fn load_styles() {
     let provider = gtk::CssProvider::new();

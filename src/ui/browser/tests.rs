@@ -3,6 +3,14 @@
 use super::*;
 
 #[test]
+fn file_sizes_use_compact_decimal_units() {
+    assert_eq!(format_file_size(999), "999 B");
+    assert_eq!(format_file_size(1_200), "1.2 kB");
+    assert_eq!(format_file_size(1_000_000), "1 MB");
+    assert_eq!(format_file_size(2_500_000_000), "2.5 GB");
+}
+
+#[test]
 fn reveal_target_scrolls_only_enough_to_show_the_new_column() {
     assert_eq!(
         horizontal_reveal_target(0.0, 900.0, 0.0, 1_200.0, 900.0, 1_200.0),

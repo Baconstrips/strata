@@ -1,15 +1,28 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <gresources>
   <gresource prefix="/io/github/lgse/Strata">
+    <file>icons/scalable/actions/strata-arrow-up-down.svg</file>
+    <file>icons/scalable/actions/strata-check.svg</file>
+    <file>icons/scalable/actions/strata-copy.svg</file>
     <file>icons/scalable/actions/strata-download.svg</file>
+    <file>icons/scalable/actions/strata-eye-off.svg</file>
+    <file>icons/scalable/actions/strata-eye.svg</file>
     <file>icons/scalable/actions/strata-file-text.svg</file>
     <file>icons/scalable/actions/strata-folder.svg</file>
+    <file>icons/scalable/actions/strata-funnel.svg</file>
+    <file>icons/scalable/actions/strata-grid.svg</file>
     <file>icons/scalable/actions/strata-hard-drive.svg</file>
     <file>icons/scalable/actions/strata-house.svg</file>
     <file>icons/scalable/actions/strata-image.svg</file>
+    <file>icons/scalable/actions/strata-list-active.svg</file>
+    <file>icons/scalable/actions/strata-list.svg</file>
     <file>icons/scalable/actions/strata-panel-left-symbolic.svg</file>
-    <file>icons/scalable/actions/strata-search-symbolic.svg</file>
+    <file>icons/scalable/actions/strata-rows.svg</file>
+    <file>icons/scalable/actions/strata-search.svg</file>
+    <file>icons/scalable/actions/strata-settings-active.svg</file>
+    <file>icons/scalable/actions/strata-settings.svg</file>
     <file>icons/scalable/actions/strata-trash.svg</file>
     <file>icons/scalable/actions/strata-video.svg</file>
+    <file>icons/scalable/actions/strata-x.svg</file>
   </gresource>
 </gresources>

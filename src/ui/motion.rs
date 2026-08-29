@@ -1,9 +1,20 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+use std::cell::Cell;
+
+thread_local! {
+    static REDUCE_MOTION: Cell<bool> = const { Cell::new(false) };
+}
+
+pub(super) fn set_reduce_motion(reduced: bool) {
+    REDUCE_MOTION.set(reduced);
+}
+
 pub(super) fn animations_enabled() -> bool {
-    gtk::Settings::default()
-        .map(|settings| settings.is_gtk_enable_animations())
-        .unwrap_or(true)
+    !REDUCE_MOTION.get()
+        && gtk::Settings::default()
+            .map(|settings| settings.is_gtk_enable_animations())
+            .unwrap_or(true)
 }
 
 pub(super) fn emphasized_deceleration(progress: f64) -> f64 {

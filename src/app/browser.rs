@@ -252,6 +252,20 @@ impl Browser {
         }
     }
 
+    pub fn close_column(&self, depth: usize) {
+        self.close_peek();
+        let closed = self.state.borrow_mut().close_from(depth);
+        if let Some((parent_depth, position)) = closed {
+            self.loads.borrow_mut().truncate(depth);
+            self.monitors.borrow_mut().truncate(depth);
+            self.emit(BrowserEvent::ColumnsTruncated { len: depth });
+            self.emit(BrowserEvent::FocusChanged {
+                depth: parent_depth,
+                position,
+            });
+        }
+    }
+
     pub fn commit_peek(self: &Rc<Self>) {
         let target = self.state.borrow().peek_target();
         if let Some((origin_depth, location)) = target {
@@ -260,25 +274,20 @@ impl Browser {
         }
     }
 
-    pub fn set_sort_key(&self, sort_key: SortKey) {
-        let mut preferences = self.preferences.get();
-        preferences.sort_key = sort_key;
-        self.apply_preferences(preferences);
+    pub fn set_sort_key(&self, depth: usize, sort_key: SortKey) {
+        self.apply_column_preferences(depth, |preferences| preferences.sort_key = sort_key);
     }
 
-    pub fn toggle_sort_direction(&self) {
-        let mut preferences = self.preferences.get();
-        preferences.sort_direction = match preferences.sort_direction {
-            SortDirection::Ascending => SortDirection::Descending,
-            SortDirection::Descending => SortDirection::Ascending,
-        };
-        self.apply_preferences(preferences);
+    pub fn set_sort_direction(&self, depth: usize, sort_direction: SortDirection) {
+        self.apply_column_preferences(depth, |preferences| {
+            preferences.sort_direction = sort_direction;
+        });
     }
 
-    pub fn set_folders_first(&self, folders_first: bool) {
-        let mut preferences = self.preferences.get();
-        preferences.folders_first = folders_first;
-        self.apply_preferences(preferences);
+    pub fn set_folders_first(&self, depth: usize, folders_first: bool) {
+        self.apply_column_preferences(depth, |preferences| {
+            preferences.folders_first = folders_first;
+        });
     }
 
     pub fn toggle_hidden(self: &Rc<Self>) {
@@ -288,7 +297,7 @@ impl Browser {
 
         let locations = {
             let mut state = self.state.borrow_mut();
-            state.set_preferences(preferences);
+            state.set_show_hidden(preferences.show_hidden);
             state
                 .columns
                 .iter()
@@ -304,21 +313,20 @@ impl Browser {
         }
     }
 
-    fn apply_preferences(&self, preferences: ViewPreferences) {
-        self.preferences.set(preferences);
-        let (columns, focus) = {
+    fn apply_column_preferences(&self, depth: usize, update: impl FnOnce(&mut ViewPreferences)) {
+        let result = {
             let mut state = self.state.borrow_mut();
-            state.set_preferences(preferences);
-            (state.column_entries(), state.active_focus())
+            let Some(mut preferences) = state.column_preferences(depth) else {
+                return;
+            };
+            update(&mut preferences);
+            state.set_column_preferences(depth, preferences)
         };
-        for (depth, entries, selected) in columns {
+        if let Some((entries, selected)) = result {
             self.emit(BrowserEvent::EntriesReplaced { depth, entries });
             if let Some(position) = selected {
                 self.emit(BrowserEvent::SelectionChanged { depth, position });
             }
-        }
-        if let Some((depth, position)) = focus {
-            self.emit(BrowserEvent::FocusChanged { depth, position });
         }
     }
 

@@ -36,6 +36,7 @@ pub struct ColumnState {
     pub selected: Option<usize>,
     selection_target: Option<Location>,
     pub load_state: LoadState,
+    preferences: ViewPreferences,
     request_id: RequestId,
 }
 
@@ -127,6 +128,7 @@ impl NavigationState {
         request_ids: impl IntoIterator<Item = RequestId>,
     ) {
         self.peek = None;
+        let preferences = self.preferences;
         self.columns = path
             .locations
             .into_iter()
@@ -137,6 +139,7 @@ impl NavigationState {
                 selected: None,
                 selection_target: None,
                 load_state: LoadState::Loading,
+                preferences,
                 request_id,
             })
             .collect();
@@ -200,6 +203,7 @@ impl NavigationState {
             selected: None,
             selection_target: None,
             load_state: LoadState::Loading,
+            preferences: self.preferences,
             request_id,
         });
     }
@@ -209,8 +213,8 @@ impl NavigationState {
         request_id: RequestId,
         entries: Vec<FileEntry>,
     ) -> Option<(usize, Vec<EntryInsertion>)> {
-        let preferences = self.preferences;
         let (depth, column) = self.column_for_request_mut(request_id)?;
+        let preferences = column.preferences;
         let selected_location = column
             .selected
             .and_then(|position| column.entries.get(position))
@@ -238,11 +242,11 @@ impl NavigationState {
         watched: &Location,
         change: DirectoryChange,
     ) -> Option<(Vec<EntrySplice>, Option<usize>)> {
-        let preferences = self.preferences;
         let column = self
             .columns
             .get_mut(depth)
             .filter(|column| &column.location == watched)?;
+        let preferences = column.preferences;
         let mut selected_location = column
             .selected
             .and_then(|position| column.entries.get(position))
@@ -308,31 +312,38 @@ impl NavigationState {
         Some(column.location.clone())
     }
 
-    pub fn set_preferences(&mut self, preferences: ViewPreferences) {
-        self.preferences = preferences;
+    pub fn set_show_hidden(&mut self, show_hidden: bool) {
+        self.preferences.show_hidden = show_hidden;
         for column in &mut self.columns {
-            let selected_location = column
-                .selected
-                .and_then(|position| column.entries.get(position))
-                .map(|entry| entry.location.clone());
-            column
-                .entries
-                .sort_by(|left, right| compare_entries(left, right, preferences));
-            column.selected = selected_location.and_then(|location| {
-                column
-                    .entries
-                    .iter()
-                    .position(|entry| entry.location == location)
-            });
+            column.preferences.show_hidden = show_hidden;
         }
     }
 
-    pub fn column_entries(&self) -> Vec<(usize, Vec<FileEntry>, Option<usize>)> {
-        self.columns
-            .iter()
-            .enumerate()
-            .map(|(depth, column)| (depth, column.entries.clone(), column.selected))
-            .collect()
+    pub fn column_preferences(&self, depth: usize) -> Option<ViewPreferences> {
+        self.columns.get(depth).map(|column| column.preferences)
+    }
+
+    pub fn set_column_preferences(
+        &mut self,
+        depth: usize,
+        preferences: ViewPreferences,
+    ) -> Option<(Vec<FileEntry>, Option<usize>)> {
+        let column = self.columns.get_mut(depth)?;
+        let selected_location = column
+            .selected
+            .and_then(|position| column.entries.get(position))
+            .map(|entry| entry.location.clone());
+        column.preferences = preferences;
+        column
+            .entries
+            .sort_by(|left, right| compare_entries(left, right, preferences));
+        column.selected = selected_location.and_then(|location| {
+            column
+                .entries
+                .iter()
+                .position(|entry| entry.location == location)
+        });
+        Some((column.entries.clone(), column.selected))
     }
 
     pub fn active_focus(&self) -> Option<(usize, Option<usize>)> {
@@ -450,15 +461,20 @@ impl NavigationState {
     }
 
     pub fn close_deepest(&mut self) -> Option<(usize, Option<usize>)> {
-        if self.columns.len() <= 1 {
+        let depth = self.columns.len().checked_sub(1)?;
+        self.close_from(depth)
+    }
+
+    pub fn close_from(&mut self, depth: usize) -> Option<(usize, Option<usize>)> {
+        if depth == 0 || depth >= self.columns.len() {
             return None;
         }
         self.record_navigation();
         self.peek = None;
-        self.columns.truncate(self.columns.len() - 1);
-        let depth = self.columns.len() - 1;
-        self.active_column = Some(depth);
-        Some((depth, self.columns[depth].selected))
+        self.columns.truncate(depth);
+        let parent_depth = depth - 1;
+        self.active_column = Some(parent_depth);
+        Some((parent_depth, self.columns[parent_depth].selected))
     }
 
     pub fn entry_at(&self, depth: usize, position: usize) -> Option<FileEntry> {

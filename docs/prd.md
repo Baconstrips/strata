@@ -196,11 +196,11 @@ Preferences include:
 - Sidebar and preview visibility
 - Hidden-file behavior
 - Sorting defaults
-- Hover-peek enablement and delay
+- Hover-peek enablement and delay; disabling it prevents all automatic folder peeks
 - Thumbnail behavior
 - Search exclusions
 - Interface and preview fonts
-- Theme source and reduced motion
+- Theme source and reduced motion; reduced motion disables nonessential interface animations
 - Configurable keybindings
 
 Settings must have stable defaults and tolerate unknown values from newer versions.

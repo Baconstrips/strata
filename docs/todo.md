@@ -75,7 +75,7 @@ Legend: **P0** blocks the milestone, **P1** is required for its exit criteria, *
 - [x] **P0** Keep peek alive while moving into its anchored popover
 - [x] **P0** Commit a peek by click or keyboard action
 - [x] **P1** Dismiss the popover without changing committed columns when a peek closes
-- [ ] **P1** Add setting to disable hover peeking
+- [x] **P1** Add setting to disable all automatic hover peeking
 - [ ] **P1** Test rapid pointer movement and slow directories
 
 ### Navigation controls
@@ -83,6 +83,8 @@ Legend: **P0** blocks the milestone, **P1** is required for its exit criteria, *
 - [x] **P0** Back, forward, parent, and home commands
 - [x] **P0** Editable location entry with validation and error feedback
 - [x] **P1** Breadcrumb/path display
+- [x] **P1** Copy the current path from the active breadcrumb
+- [x] **P1** Activate location editing from `Ctrl+L` or empty breadcrumb-bar space
 - [x] **P1** Reveal and focus the active location after navigation
 - [x] **P1** Handle symlinks and inaccessible destinations deliberately
 
@@ -107,6 +109,7 @@ Legend: **P0** blocks the milestone, **P1** is required for its exit criteria, *
 - [x] **P1** Handle invalid UTF-8 display names without losing native paths
 - [x] **P1** Handle broken symlinks and files disappearing during navigation
 - [x] **P1** Add configurable folders-first sorting
+- [x] **P1** Move sorting, folders-first, and filtering controls into each pane header
 
 ### Sidebar
 
@@ -207,7 +210,7 @@ Legend: **P0** blocks the milestone, **P1** is required for its exit criteria, *
 - [ ] **P0** Centralize defaults and tolerate unknown settings
 - [ ] **P1** Preferences UI
 - [ ] **P1** Configurable keybindings and conflict detection
-- [ ] **P1** Reduced-motion preference
+- [x] **P1** Reduced-motion preference that disables nonessential animations
 - [ ] **P1** Import/export settings
 
 ## M5 — Hardening and release

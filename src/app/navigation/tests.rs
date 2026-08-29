@@ -280,6 +280,22 @@ fn closing_the_deepest_column_preserves_the_parent_selection() {
 }
 
 #[test]
+fn closing_a_middle_column_removes_it_and_its_descendants() {
+    let mut state = NavigationState::default();
+    state.navigate(location("/home"), RequestId(1));
+    state.apply_batch(RequestId(1), vec![entry("/home/projects")]);
+    assert!(state.select(0, 0));
+    assert!(state.descend(0, location("/home/projects"), RequestId(2)));
+    state.apply_batch(RequestId(2), vec![entry("/home/projects/strata")]);
+    assert!(state.select(1, 0));
+    assert!(state.descend(1, location("/home/projects/strata"), RequestId(3)));
+
+    assert_eq!(state.close_from(1), Some((0, Some(0))));
+    assert_eq!(state.columns.len(), 1);
+    assert_eq!(state.close_from(0), None);
+}
+
+#[test]
 fn batches_are_merged_into_one_global_sort_order() {
     let mut state = NavigationState::default();
     state.navigate(location("/fixture"), RequestId(1));
@@ -310,10 +326,17 @@ fn changing_sort_preferences_preserves_the_selected_entry() {
     );
     assert!(state.select(0, 0));
 
-    state.set_preferences(ViewPreferences {
-        sort_direction: SortDirection::Descending,
-        ..ViewPreferences::default()
-    });
+    assert!(
+        state
+            .set_column_preferences(
+                0,
+                ViewPreferences {
+                    sort_direction: SortDirection::Descending,
+                    ..ViewPreferences::default()
+                },
+            )
+            .is_some()
+    );
 
     assert_eq!(state.columns[0].entries[0].display_name, "z");
     assert_eq!(state.columns[0].selected, Some(1));
@@ -323,4 +346,40 @@ fn changing_sort_preferences_preserves_the_selected_entry() {
             .map(|(_, _, entry)| entry.display_name),
         Some("a".into())
     );
+}
+
+#[test]
+fn changing_sort_preferences_only_reorders_the_target_column() {
+    let mut state = NavigationState::default();
+    state.navigate(location("/fixture"), RequestId(1));
+    state.apply_batch(
+        RequestId(1),
+        vec![
+            named_entry("/fixture/a", "a"),
+            named_entry("/fixture/z", "z"),
+        ],
+    );
+    assert!(state.descend(0, location("/fixture/child"), RequestId(2)));
+    state.apply_batch(
+        RequestId(2),
+        vec![
+            named_entry("/fixture/child/a", "a"),
+            named_entry("/fixture/child/z", "z"),
+        ],
+    );
+
+    assert!(
+        state
+            .set_column_preferences(
+                1,
+                ViewPreferences {
+                    sort_direction: SortDirection::Descending,
+                    ..ViewPreferences::default()
+                },
+            )
+            .is_some()
+    );
+
+    assert_eq!(state.columns[0].entries[0].display_name, "a");
+    assert_eq!(state.columns[1].entries[0].display_name, "z");
 }
