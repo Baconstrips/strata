@@ -8,6 +8,15 @@ use crate::{
     services::LoadHandle,
 };
 
+#[test]
+fn rename_validation_rejects_empty_reserved_and_nested_names() {
+    assert!(validate_rename("").is_err());
+    assert!(validate_rename(".").is_err());
+    assert!(validate_rename("..").is_err());
+    assert!(validate_rename("nested/name").is_err());
+    assert!(validate_rename("report.txt").is_ok());
+}
+
 struct FakeFileSource;
 
 struct FilePreviewSource;

@@ -12,7 +12,7 @@ use gtk::{gio, glib, prelude::*};
 use crate::{
     app::{Browser, BrowserEvent},
     model::{FileEntry, Location, SortDirection, SortKey},
-    services::FileSource,
+    services::{FileSource, OperationProvider},
 };
 
 use super::motion::{animations_enabled, emphasized_deceleration};
@@ -51,6 +51,12 @@ struct ColumnView {
     bound_rows: Rc<RefCell<Vec<BoundRow>>>,
     entry_count: Rc<Cell<usize>>,
     spinner: gtk::Spinner,
+}
+
+struct ActiveRename {
+    entry: FileEntry,
+    field: gtk::Entry,
+    label: gtk::Label,
 }
 
 struct PeekView {
@@ -175,6 +181,7 @@ struct ViewState {
     peek_anchor: RefCell<Option<gtk::Widget>>,
     peek_behavior: PeekBehavior,
     peek_enabled: Cell<bool>,
+    active_rename: RefCell<Option<ActiveRename>>,
     browser: Rc<Browser>,
 }
 
@@ -273,6 +280,7 @@ impl BrowserView {
             peek_anchor: RefCell::new(None),
             peek_behavior,
             peek_enabled: Cell::new(true),
+            active_rename: RefCell::new(None),
             browser,
         });
 
@@ -334,6 +342,22 @@ impl BrowserView {
         self.state.browser.clone()
     }
 
+    pub fn set_operation_provider(&self, provider: Rc<dyn OperationProvider>) {
+        self.state.browser.set_operation_provider(provider);
+    }
+
+    pub fn begin_rename(&self) -> bool {
+        self.state.begin_rename()
+    }
+
+    pub fn cancel_rename(&self) -> bool {
+        self.state.cancel_rename()
+    }
+
+    pub fn rename_is_active(&self) -> bool {
+        self.state.active_rename.borrow().is_some()
+    }
+
     pub fn occupied_width(&self) -> i32 {
         (self.state.columns.borrow().len() as i32).saturating_mul(COLUMN_WIDTH)
     }
@@ -389,6 +413,80 @@ impl BrowserView {
 }
 
 impl ViewState {
+    fn begin_rename(&self) -> bool {
+        let Some((depth, source_position, entry)) = self.browser.focused_item() else {
+            return false;
+        };
+        self.cancel_rename();
+        let columns = self.columns.borrow();
+        let Some(column) = columns.get(depth) else {
+            return false;
+        };
+        let Some(filtered_position) = filtered_position_for_source(column, source_position) else {
+            return false;
+        };
+        let row = column.bound_rows.borrow().iter().find_map(|bound| {
+            let item = bound.item.upgrade()?;
+            (item.position() == filtered_position).then(|| bound.row.upgrade())?
+        });
+        let Some(row) = row else {
+            return false;
+        };
+        let Some(icon) = row.first_child() else {
+            return false;
+        };
+        let Some(label) = icon.next_sibling().and_downcast::<gtk::Label>() else {
+            return false;
+        };
+        let Some(field) = label.next_sibling().and_downcast::<gtk::Entry>() else {
+            return false;
+        };
+        field.remove_css_class("error");
+        field.set_tooltip_text(None);
+        field.set_sensitive(true);
+        field.set_text(&entry.display_name);
+        label.set_visible(false);
+        field.set_visible(true);
+        field.grab_focus();
+        field.select_region(0, rename_stem_end(&entry.display_name));
+        self.active_rename.replace(Some(ActiveRename {
+            entry,
+            field,
+            label,
+        }));
+        true
+    }
+
+    fn cancel_rename(&self) -> bool {
+        let Some(rename) = self.active_rename.take() else {
+            return false;
+        };
+        rename.field.remove_css_class("error");
+        rename.field.set_tooltip_text(None);
+        rename.field.set_visible(false);
+        rename.field.set_sensitive(true);
+        rename.label.set_visible(true);
+        true
+    }
+
+    fn submit_rename(self: &Rc<Self>, field: &gtk::Entry) {
+        let mut active = self.active_rename.borrow_mut();
+        let Some(rename) = active.as_mut().filter(|rename| rename.field == *field) else {
+            return;
+        };
+        let new_name = field.text().to_string();
+        if new_name == rename.entry.display_name {
+            drop(active);
+            self.cancel_rename();
+            self.browser.focus_active();
+            return;
+        }
+        field.remove_css_class("error");
+        field.set_tooltip_text(None);
+        field.set_sensitive(false);
+        self.browser.rename(rename.entry.clone(), new_name);
+    }
+
     fn begin_location_edit(&self) {
         self.clear_location_error();
         self.location_stack.set_visible_child_name("entry");
@@ -703,6 +801,18 @@ impl ViewState {
             BrowserEvent::OpenRequested { location } => {
                 open_location(&location, &self.overlay);
             }
+            BrowserEvent::RenameCompleted => {
+                self.cancel_rename();
+                self.browser.focus_active();
+            }
+            BrowserEvent::RenameFailed { message } => {
+                if let Some(rename) = self.active_rename.borrow().as_ref() {
+                    rename.field.set_sensitive(true);
+                    rename.field.add_css_class("error");
+                    rename.field.set_tooltip_text(Some(&message));
+                    rename.field.grab_focus();
+                }
+            }
             BrowserEvent::NavigationRejected { message } => {
                 show_error_dialog(&self.overlay, "Unable to open directory", &message);
             }
@@ -895,6 +1005,16 @@ impl ViewState {
                 .hexpand(true)
                 .ellipsize(gtk::pango::EllipsizeMode::End)
                 .build();
+            let rename = gtk::Entry::new();
+            rename.add_css_class("inline-rename");
+            rename.set_hexpand(true);
+            rename.set_visible(false);
+            let weak_state_for_rename = weak_state.clone();
+            rename.connect_activate(move |field| {
+                if let Some(state) = weak_state_for_rename.upgrade() {
+                    state.submit_rename(field);
+                }
+            });
             let size = gtk::Label::new(None);
             size.add_css_class("file-size");
             size.set_xalign(1.0);
@@ -902,6 +1022,7 @@ impl ViewState {
             chevron.add_css_class("file-chevron");
             row.append(&icon);
             row.append(&label);
+            row.append(&rename);
             row.append(&size);
             row.append(&chevron);
             let motion = gtk::EventControllerMotion::new();
@@ -1016,13 +1137,18 @@ impl ViewState {
             let Some(label) = icon.next_sibling().and_downcast::<gtk::Label>() else {
                 return;
             };
-            let Some(size) = label.next_sibling().and_downcast::<gtk::Label>() else {
+            let Some(rename) = label.next_sibling().and_downcast::<gtk::Entry>() else {
+                return;
+            };
+            let Some(size) = rename.next_sibling().and_downcast::<gtk::Label>() else {
                 return;
             };
             let Some(chevron) = size.next_sibling().and_downcast::<gtk::Image>() else {
                 return;
             };
             label.set_label(model_display_name(&value.string()));
+            rename.set_visible(false);
+            label.set_visible(true);
             let source_position =
                 source_position_for_filtered(&source_for_bind, &filtered_for_bind, item.position());
             let browser = weak_browser_for_bind.upgrade();
@@ -1482,6 +1608,7 @@ impl ViewState {
 
     fn truncate(self: &Rc<Self>, len: usize) {
         self.close_peek_visual();
+        self.cancel_rename();
         self.horizontal_scroll_generation
             .set(self.horizontal_scroll_generation.get().saturating_add(1));
         while self.columns.borrow().len() > len {
@@ -1781,6 +1908,14 @@ fn set_active_path_style(row: &gtk::Box, active: bool) {
     } else {
         row.remove_css_class("active-path");
     }
+}
+
+fn rename_stem_end(name: &str) -> i32 {
+    let end = name
+        .rfind('.')
+        .filter(|position| *position > 0)
+        .unwrap_or(name.len());
+    name[..end].chars().count().min(i32::MAX as usize) as i32
 }
 
 fn entry_model_value(entry: &FileEntry) -> String {

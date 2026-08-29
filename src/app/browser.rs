@@ -11,7 +11,8 @@ use crate::{
     model::{FileEntry, Location, SortDirection, SortKey, ViewPreferences},
     services::{
         DirectoryChange, DirectoryEvent, DirectoryRequest, FileSource, LoadHandle,
-        LocationValidationError, RequestId,
+        LocationValidationError, OperationEvent, OperationProvider, OperationRequestId,
+        RenameRequest, RequestId,
     },
 };
 
@@ -74,6 +75,10 @@ pub enum BrowserEvent {
     OpenRequested {
         location: Location,
     },
+    RenameCompleted,
+    RenameFailed {
+        message: String,
+    },
     NavigationRejected {
         message: String,
     },
@@ -87,6 +92,9 @@ pub struct Browser {
     loads: RefCell<Vec<LoadHandle>>,
     monitors: RefCell<Vec<Option<LoadHandle>>>,
     peek_load: RefCell<Option<LoadHandle>>,
+    operation_provider: RefCell<Option<Rc<dyn OperationProvider>>>,
+    operation_load: RefCell<Option<LoadHandle>>,
+    current_operation: Cell<Option<OperationRequestId>>,
     next_request: Cell<u64>,
     preferences: Cell<ViewPreferences>,
     observers: RefCell<Vec<Observer>>,
@@ -100,6 +108,9 @@ impl Browser {
             loads: RefCell::new(Vec::new()),
             monitors: RefCell::new(Vec::new()),
             peek_load: RefCell::new(None),
+            operation_provider: RefCell::new(None),
+            operation_load: RefCell::new(None),
+            current_operation: Cell::new(None),
             next_request: Cell::new(1),
             preferences: Cell::new(ViewPreferences::default()),
             observers: RefCell::new(Vec::new()),
@@ -112,6 +123,10 @@ impl Browser {
 
     pub fn clear_observer(&self) {
         self.observers.borrow_mut().clear();
+    }
+
+    pub fn set_operation_provider(&self, provider: Rc<dyn OperationProvider>) {
+        self.operation_provider.replace(Some(provider));
     }
 
     pub fn navigate_input(self: &Rc<Self>, input: &str) -> Result<(), LocationValidationError> {
@@ -374,11 +389,12 @@ impl Browser {
         self.state.borrow().entry_at(depth, position)
     }
 
+    pub fn focused_item(&self) -> Option<(usize, usize, FileEntry)> {
+        self.state.borrow().focused_entry()
+    }
+
     pub fn focused_entry(&self) -> Option<FileEntry> {
-        self.state
-            .borrow()
-            .focused_entry()
-            .map(|(_, _, entry)| entry)
+        self.focused_item().map(|(_, _, entry)| entry)
     }
 
     pub fn set_selection(&self, depth: usize, positions: &[usize], focused: Option<usize>) {
@@ -394,6 +410,56 @@ impl Browser {
 
     pub fn active_child_position(&self, depth: usize) -> Option<usize> {
         self.state.borrow().active_child_position(depth)
+    }
+
+    pub fn rename(self: &Rc<Self>, entry: FileEntry, new_name: String) {
+        if let Err(message) = validate_rename(&new_name) {
+            self.emit(BrowserEvent::RenameFailed {
+                message: message.to_owned(),
+            });
+            return;
+        }
+        let Some(provider) = self.operation_provider.borrow().clone() else {
+            self.emit(BrowserEvent::RenameFailed {
+                message: "File operations are unavailable".to_owned(),
+            });
+            return;
+        };
+        self.operation_load.borrow_mut().take();
+        let request_id = OperationRequestId(self.next_request.get());
+        self.next_request
+            .set(self.next_request.get().saturating_add(1));
+        self.current_operation.set(Some(request_id));
+        let weak = Rc::downgrade(self);
+        let emit = Rc::new(move |event| {
+            let Some(browser) = weak.upgrade() else {
+                return;
+            };
+            let event_id = match &event {
+                OperationEvent::Renamed { request_id }
+                | OperationEvent::Failed { request_id, .. } => *request_id,
+            };
+            if browser.current_operation.get() != Some(event_id) {
+                return;
+            }
+            browser.current_operation.set(None);
+            browser.operation_load.borrow_mut().take();
+            match event {
+                OperationEvent::Renamed { .. } => browser.emit(BrowserEvent::RenameCompleted),
+                OperationEvent::Failed { message, .. } => {
+                    browser.emit(BrowserEvent::RenameFailed { message });
+                }
+            }
+        });
+        let load = provider.rename(
+            RenameRequest {
+                id: request_id,
+                entry,
+                new_name,
+            },
+            emit,
+        );
+        self.operation_load.replace(Some(load));
     }
 
     pub fn preview(self: &Rc<Self>, depth: usize, position: usize) {
@@ -654,6 +720,18 @@ impl Browser {
         let id = self.next_request.get();
         self.next_request.set(id.saturating_add(1));
         RequestId(id)
+    }
+}
+
+fn validate_rename(name: &str) -> Result<(), &'static str> {
+    if name.is_empty() {
+        Err("Enter a file name")
+    } else if name.contains('/') {
+        Err("File names cannot contain /")
+    } else if matches!(name, "." | "..") {
+        Err("That name is reserved")
+    } else {
+        Ok(())
     }
 }
 

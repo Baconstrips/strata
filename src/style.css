@@ -668,6 +668,20 @@ menubutton.column-header-action > button:checked image {
   color: @theme_text;
 }
 
+.inline-rename {
+  background: @theme_surface;
+  border: 1px solid @theme_accent;
+  border-radius: 4px;
+  color: @theme_text;
+  min-height: 22px;
+  padding: 0 4px;
+}
+
+.inline-rename selection {
+  background: @theme_accent;
+  color: @theme_bg;
+}
+
 .file-icon {
   margin-left: 1px;
 }

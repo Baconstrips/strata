@@ -11,7 +11,7 @@ use std::{
 use gtk::{gio, glib, prelude::*};
 
 use crate::{
-    adapters::{LocalFileSource, LocalPreviewProvider},
+    adapters::{LocalFileSource, LocalOperationProvider, LocalPreviewProvider},
     app::{Browser, BrowserEvent},
     model::Location,
 };
@@ -43,6 +43,7 @@ pub fn present_location(application: &gtk::Application, location: Option<PathBuf
         .build();
 
     let browser = BrowserView::new(Rc::new(LocalFileSource), PeekBehavior::default());
+    browser.set_operation_provider(Rc::new(LocalOperationProvider));
     let controller = browser.browser();
     let preview = PreviewDrawer::new(Rc::new(LocalPreviewProvider));
     let preview_for_selection = preview.clone();
@@ -256,6 +257,15 @@ fn install_keyboard_navigation(
         let alt = modifiers.contains(gtk::gdk::ModifierType::ALT_MASK);
         let control = modifiers.contains(gtk::gdk::ModifierType::CONTROL_MASK);
         let shift = modifiers.contains(gtk::gdk::ModifierType::SHIFT_MASK);
+        if key == gtk::gdk::Key::F2 && view.begin_rename() {
+            return glib::Propagation::Stop;
+        }
+        if key == gtk::gdk::Key::Escape && view.cancel_rename() {
+            return glib::Propagation::Stop;
+        }
+        if view.rename_is_active() {
+            return glib::Propagation::Proceed;
+        }
         if key == gtk::gdk::Key::Escape && view.dismiss_focused_filter() {
             return glib::Propagation::Stop;
         }

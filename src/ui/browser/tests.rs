@@ -11,6 +11,14 @@ fn file_sizes_use_compact_decimal_units() {
 }
 
 #[test]
+fn inline_rename_selects_the_stem_but_keeps_the_extension() {
+    assert_eq!(rename_stem_end("report.txt"), 6);
+    assert_eq!(rename_stem_end("archive.tar.gz"), 11);
+    assert_eq!(rename_stem_end("README"), 6);
+    assert_eq!(rename_stem_end(".gitignore"), 10);
+}
+
+#[test]
 fn file_names_map_to_specific_lucide_icons() {
     assert_eq!(icon_for_name("setup.sh"), crate::assets::icons::TERMINAL);
     assert_eq!(icon_for_name("photo.webp"), crate::assets::icons::PICTURES);

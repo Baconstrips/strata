@@ -128,7 +128,7 @@ Legend: **P0** blocks the milestone, **P1** is required for its exit criteria, *
 - [x] **P0** Open files with the default application
 - [ ] **P0** Add an Open With chooser
 - [ ] **P0** Create folder (`Ctrl+Shift+N`) and empty file
-- [ ] **P0** Replace the selected row label with an inline rename input on `F2`, preserving the extension selection and showing validation feedback in place
+- [x] **P0** Replace the selected row label with an inline rename input on `F2`, preserving the extension selection and showing validation feedback in place
 - [ ] **P1** Executable-file policy and confirmation
 
 ### Context menu (revisit after core actions exist)
