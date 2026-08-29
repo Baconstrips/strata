@@ -70,6 +70,9 @@ pub enum BrowserEvent {
     OpenRequested {
         location: Location,
     },
+    NavigationRejected {
+        message: String,
+    },
 }
 
 type Observer = Rc<dyn Fn(BrowserEvent)>;
@@ -156,6 +159,13 @@ impl Browser {
 
     pub fn descend(self: &Rc<Self>, parent_depth: usize, location: Location) {
         self.close_peek();
+        if let Err(error) = self.source.validate_location(&location) {
+            self.emit(BrowserEvent::NavigationRejected {
+                message: error.to_string(),
+            });
+            self.focus_active();
+            return;
+        }
         let request_id = self.new_request_id();
         if !self
             .state

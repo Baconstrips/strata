@@ -403,10 +403,7 @@ impl ViewState {
                         let labels: Vec<_> = insertion
                             .entries
                             .iter()
-                            .map(|entry| {
-                                let prefix = if entry.is_directory() { "▸  " } else { "   " };
-                                format!("{prefix}{}", entry.display_name)
-                            })
+                            .map(|entry| format!("{}{}", entry_prefix(entry), entry.display_name))
                             .collect();
                         let labels: Vec<_> = labels.iter().map(String::as_str).collect();
                         column.model.splice(insertion.position as u32, 0, &labels);
@@ -424,10 +421,7 @@ impl ViewState {
                     }
                     let labels: Vec<_> = entries
                         .iter()
-                        .map(|entry| {
-                            let prefix = if entry.is_directory() { "▸  " } else { "   " };
-                            format!("{prefix}{}", entry.display_name)
-                        })
+                        .map(|entry| format!("{}{}", entry_prefix(entry), entry.display_name))
                         .collect();
                     let labels: Vec<_> = labels.iter().map(String::as_str).collect();
                     column.model.splice(0, column.model.n_items(), &labels);
@@ -445,10 +439,7 @@ impl ViewState {
                         let labels: Vec<_> = splice
                             .entries
                             .iter()
-                            .map(|entry| {
-                                let prefix = if entry.is_directory() { "▸  " } else { "   " };
-                                format!("{prefix}{}", entry.display_name)
-                            })
+                            .map(|entry| format!("{}{}", entry_prefix(entry), entry.display_name))
                             .collect();
                         let labels: Vec<_> = labels.iter().map(String::as_str).collect();
                         column
@@ -553,7 +544,12 @@ impl ViewState {
                     column.list.grab_focus();
                 }
             }
-            BrowserEvent::OpenRequested { location } => open_file(location.path()),
+            BrowserEvent::OpenRequested { location } => {
+                open_file(location.path(), &self.overlay);
+            }
+            BrowserEvent::NavigationRejected { message } => {
+                show_error_dialog(&self.overlay, "Unable to open directory", &message);
+            }
         }
     }
 
@@ -942,6 +938,20 @@ fn basic_label_factory() -> gtk::SignalListItemFactory {
     factory
 }
 
+fn entry_prefix(entry: &FileEntry) -> &'static str {
+    if entry.is_broken_symbolic_link() {
+        "×  "
+    } else if entry.is_directory() && entry.is_symbolic_link() {
+        "▸↗ "
+    } else if entry.is_directory() {
+        "▸  "
+    } else if entry.is_symbolic_link() {
+        " ↗ "
+    } else {
+        "   "
+    }
+}
+
 fn append_entries(
     model: &gtk::StringList,
     stored_count: &Rc<Cell<usize>>,
@@ -953,8 +963,7 @@ fn append_entries(
         .unwrap_or(entries.len());
     let mut appended = 0;
     for entry in entries.into_iter().take(remaining) {
-        let prefix = if entry.is_directory() { "▸  " } else { "   " };
-        model.append(&format!("{prefix}{}", entry.display_name));
+        model.append(&format!("{}{}", entry_prefix(&entry), entry.display_name));
         appended += 1;
     }
     stored_count.set(stored_count.get() + appended);
@@ -1052,11 +1061,22 @@ fn animate_horizontal_scroll(
     });
 }
 
-fn open_file(path: &Path) {
+fn open_file(path: &Path, parent: &impl IsA<gtk::Widget>) {
     let uri = gio::File::for_path(path).uri();
     if let Err(error) = gio::AppInfo::launch_default_for_uri(&uri, None::<&gio::AppLaunchContext>) {
         tracing::warn!(path = %path.display(), error = %error, "unable to open file");
+        show_error_dialog(parent, "Unable to open file", &error.to_string());
     }
+}
+
+fn show_error_dialog(parent: &impl IsA<gtk::Widget>, message: &str, detail: &str) {
+    let dialog = gtk::AlertDialog::builder()
+        .modal(true)
+        .message(message)
+        .detail(detail)
+        .build();
+    let window = parent.root().and_downcast::<gtk::Window>();
+    dialog.show(window.as_ref());
 }
 
 #[cfg(test)]

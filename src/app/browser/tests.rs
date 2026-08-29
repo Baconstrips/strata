@@ -337,6 +337,32 @@ fn valid_location_input_navigates_through_the_controller() {
 }
 
 #[test]
+fn rejected_directory_activation_preserves_navigation_state() {
+    let browser = Browser::new(Rc::new(RejectingFileSource));
+    let events = Rc::new(RefCell::new(Vec::new()));
+    let observed = events.clone();
+    browser.observe(move |event| observed.borrow_mut().push(event));
+    browser.navigate(Location::local("/fixture"));
+    events.borrow_mut().clear();
+
+    browser.descend(0, Location::local("/fixture/restricted"));
+
+    assert_eq!(browser.active_location(), Some(Location::local("/fixture")));
+    assert!(
+        events
+            .borrow()
+            .iter()
+            .any(|event| matches!(event, BrowserEvent::NavigationRejected { .. }))
+    );
+    assert!(
+        !events
+            .borrow()
+            .iter()
+            .any(|event| matches!(event, BrowserEvent::ColumnAdded { depth: 1, .. }))
+    );
+}
+
+#[test]
 fn rejected_location_input_preserves_navigation_state() {
     let browser = Browser::new(Rc::new(RejectingFileSource));
     let events = Rc::new(RefCell::new(Vec::new()));

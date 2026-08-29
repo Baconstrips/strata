@@ -84,7 +84,7 @@ Legend: **P0** blocks the milestone, **P1** is required for its exit criteria, *
 - [x] **P0** Editable location entry with validation and error feedback
 - [x] **P1** Breadcrumb/path display
 - [x] **P1** Reveal and focus the active location after navigation
-- [ ] **P1** Handle symlinks and inaccessible destinations deliberately
+- [x] **P1** Handle symlinks and inaccessible destinations deliberately
 
 ### Keyboard and selection
 
@@ -104,8 +104,8 @@ Legend: **P0** blocks the milestone, **P1** is required for its exit criteria, *
 - [x] **P0** Monitor directory changes and reload affected columns
 - [x] **P0** Apply directory-monitor changes incrementally without a full reload
 - [x] **P0** Preserve UI responsiveness in 100k-entry fixture
-- [ ] **P1** Handle invalid UTF-8 display names without losing native paths
-- [ ] **P1** Handle broken symlinks and files disappearing during navigation
+- [x] **P1** Handle invalid UTF-8 display names without losing native paths
+- [x] **P1** Handle broken symlinks and files disappearing during navigation
 - [x] **P1** Add configurable folders-first sorting
 
 ### Sidebar

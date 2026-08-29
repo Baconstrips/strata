@@ -73,7 +73,9 @@ impl Default for ViewPreferences {
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum EntryKind {
     Directory,
+    DirectorySymbolicLink,
     File,
+    FileSymbolicLink,
     SymbolicLink,
     Other,
 }
@@ -97,7 +99,23 @@ pub struct FileEntry {
 
 impl FileEntry {
     pub fn is_directory(&self) -> bool {
-        self.kind == EntryKind::Directory
+        matches!(
+            self.kind,
+            EntryKind::Directory | EntryKind::DirectorySymbolicLink
+        )
+    }
+
+    pub fn is_symbolic_link(&self) -> bool {
+        matches!(
+            self.kind,
+            EntryKind::DirectorySymbolicLink
+                | EntryKind::FileSymbolicLink
+                | EntryKind::SymbolicLink
+        )
+    }
+
+    pub fn is_broken_symbolic_link(&self) -> bool {
+        self.kind == EntryKind::SymbolicLink
     }
 }
 

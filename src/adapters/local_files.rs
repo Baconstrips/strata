@@ -19,7 +19,7 @@ use crate::{
     },
 };
 
-const ATTRIBUTES: &str = "standard::display-name,standard::name,standard::type,standard::is-hidden,standard::size,time::modified";
+const ATTRIBUTES: &str = "standard::display-name,standard::name,standard::type,standard::is-hidden,standard::is-symlink,standard::size,time::modified";
 
 #[derive(Default)]
 pub struct LocalFileSource;
@@ -42,10 +42,12 @@ fn map_validation_error(error: std::io::Error) -> LocationValidationError {
 
 fn entry_from_info(path: PathBuf, info: gio::FileInfo) -> FileEntry {
     let native_name = info.name().into_os_string();
-    let kind = match info.file_type() {
-        gio::FileType::Directory => EntryKind::Directory,
-        gio::FileType::Regular => EntryKind::File,
-        gio::FileType::SymbolicLink => EntryKind::SymbolicLink,
+    let kind = match (info.file_type(), info.is_symlink()) {
+        (gio::FileType::Directory, true) => EntryKind::DirectorySymbolicLink,
+        (gio::FileType::Regular, true) => EntryKind::FileSymbolicLink,
+        (gio::FileType::Directory, false) => EntryKind::Directory,
+        (gio::FileType::Regular, false) => EntryKind::File,
+        (gio::FileType::SymbolicLink, _) => EntryKind::SymbolicLink,
         _ => EntryKind::Other,
     };
     FileEntry {
@@ -53,7 +55,10 @@ fn entry_from_info(path: PathBuf, info: gio::FileInfo) -> FileEntry {
         native_name,
         display_name: info.display_name().to_string(),
         kind,
-        size: if kind == EntryKind::Directory {
+        size: if matches!(
+            kind,
+            EntryKind::Directory | EntryKind::DirectorySymbolicLink
+        ) {
             MetadataValue::Unknown
         } else {
             u64::try_from(info.size())

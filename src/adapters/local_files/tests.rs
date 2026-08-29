@@ -1,6 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use std::{error::Error, fs, io::ErrorKind, time::SystemTime};
+use std::{
+    error::Error,
+    ffi::OsString,
+    fs,
+    io::ErrorKind,
+    os::unix::ffi::{OsStrExt, OsStringExt},
+    time::SystemTime,
+};
 
 use super::*;
 use crate::model::Location;
@@ -30,6 +37,65 @@ fn validation_accepts_readable_directories_and_rejects_files_and_missing_paths()
         source.validate_location(&Location::local(&missing)),
         Err(LocationValidationError::Missing)
     );
+
+    fs::remove_dir_all(directory)?;
+    Ok(())
+}
+
+#[test]
+fn invalid_utf8_names_keep_their_native_bytes() -> Result<(), Box<dyn Error>> {
+    let unique = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)?
+        .as_nanos();
+    let directory = std::env::temp_dir().join(format!("strata-native-name-test-{unique}"));
+    fs::create_dir(&directory)?;
+    let native_name = OsString::from_vec(b"invalid-\xff".to_vec());
+    let path = directory.join(&native_name);
+    fs::write(&path, b"fixture")?;
+
+    let info = gio::File::for_path(&path).query_info(
+        ATTRIBUTES,
+        gio::FileQueryInfoFlags::NONE,
+        None::<&gio::Cancellable>,
+    )?;
+    let entry = entry_from_info(path.clone(), info);
+
+    assert_eq!(entry.native_name.as_bytes(), native_name.as_bytes());
+    assert_eq!(entry.location.path(), path);
+    assert!(!entry.display_name.is_empty());
+
+    fs::remove_dir_all(directory)?;
+    Ok(())
+}
+
+#[test]
+fn symlink_targets_and_broken_links_are_distinguished() -> Result<(), Box<dyn Error>> {
+    use std::os::unix::fs::symlink;
+
+    let unique = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)?
+        .as_nanos();
+    let directory = std::env::temp_dir().join(format!("strata-symlink-test-{unique}"));
+    fs::create_dir(&directory)?;
+    fs::create_dir(directory.join("directory"))?;
+    fs::write(directory.join("file"), b"fixture")?;
+    symlink("directory", directory.join("directory-link"))?;
+    symlink("file", directory.join("file-link"))?;
+    symlink("missing", directory.join("broken-link"))?;
+
+    let kind = |name: &str| -> Result<EntryKind, glib::Error> {
+        let path = directory.join(name);
+        let info = gio::File::for_path(&path).query_info(
+            ATTRIBUTES,
+            gio::FileQueryInfoFlags::NONE,
+            None::<&gio::Cancellable>,
+        )?;
+        Ok(entry_from_info(path, info).kind)
+    };
+
+    assert_eq!(kind("directory-link")?, EntryKind::DirectorySymbolicLink);
+    assert_eq!(kind("file-link")?, EntryKind::FileSymbolicLink);
+    assert_eq!(kind("broken-link")?, EntryKind::SymbolicLink);
 
     fs::remove_dir_all(directory)?;
     Ok(())
