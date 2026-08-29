@@ -407,7 +407,6 @@ paned > separator {
 .preview-pane {
   background: @theme_surface;
   color: @theme_text;
-  min-width: 280px;
 }
 
 .preview-header {

@@ -67,8 +67,8 @@ pub enum BrowserEvent {
         depth: usize,
         position: usize,
     },
-    OpenRequested {
-        location: Location,
+    PreviewRequested {
+        entry: FileEntry,
     },
     NavigationRejected {
         message: String,
@@ -409,9 +409,7 @@ impl Browser {
         if entry.is_directory() {
             self.descend(depth, entry.location);
         } else {
-            self.emit(BrowserEvent::OpenRequested {
-                location: entry.location,
-            });
+            self.emit(BrowserEvent::PreviewRequested { entry });
         }
     }
 

@@ -7,7 +7,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use gtk::{gio, glib, prelude::*};
+use gtk::{glib, prelude::*};
 
 use crate::{
     app::{Browser, BrowserEvent},
@@ -684,9 +684,7 @@ impl ViewState {
                     column.list.grab_focus();
                 }
             }
-            BrowserEvent::OpenRequested { location } => {
-                open_location(&location, &self.overlay);
-            }
+            BrowserEvent::PreviewRequested { .. } => {}
             BrowserEvent::NavigationRejected { message } => {
                 show_error_dialog(&self.overlay, "Unable to open directory", &message);
             }
@@ -1635,18 +1633,6 @@ fn animate_horizontal_scroll(
             glib::ControlFlow::Continue
         }
     });
-}
-
-fn open_location(location: &Location, parent: &impl IsA<gtk::Widget>) {
-    let file = location
-        .native_path()
-        .map(gio::File::for_path)
-        .unwrap_or_else(|| gio::File::for_uri(location.uri_value().unwrap_or_default()));
-    let uri = file.uri();
-    if let Err(error) = gio::AppInfo::launch_default_for_uri(&uri, None::<&gio::AppLaunchContext>) {
-        tracing::warn!(location = %location.display_path(), error = %error, "unable to open file");
-        show_error_dialog(parent, "Unable to open file", &error.to_string());
-    }
 }
 
 fn show_error_dialog(parent: &impl IsA<gtk::Widget>, message: &str, detail: &str) {

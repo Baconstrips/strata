@@ -47,22 +47,24 @@ pub fn present_location(application: &gtk::Application, location: Option<PathBuf
     let preview = PreviewDrawer::new(Rc::new(LocalPreviewProvider));
     let preview_for_selection = preview.clone();
     let weak_controller = Rc::downgrade(&controller);
-    controller.observe(move |event| {
-        if !preview_for_selection.is_open() {
-            return;
-        }
-        if let BrowserEvent::FocusChanged {
+    controller.observe(move |event| match event {
+        BrowserEvent::PreviewRequested { entry } => preview_for_selection.show(entry),
+        BrowserEvent::FocusChanged {
             depth,
             position: Some(position),
-        } = event
-        {
+        } if preview_for_selection.is_open() => {
             if let Some(entry) = weak_controller
                 .upgrade()
                 .and_then(|browser| browser.entry_at(depth, position))
             {
-                preview_for_selection.show(entry);
+                if entry.is_directory() {
+                    preview_for_selection.close();
+                } else {
+                    preview_for_selection.show(entry);
+                }
             }
         }
+        _ => {}
     });
 
     let header = gtk::HeaderBar::new();

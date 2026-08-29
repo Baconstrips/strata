@@ -10,6 +10,8 @@ use crate::{
 
 struct FakeFileSource;
 
+struct FilePreviewSource;
+
 struct RejectingFileSource;
 
 struct RetryFileSource {
@@ -139,6 +141,30 @@ impl FileSource for RejectingFileSource {
         _request: DirectoryRequest,
         _emit: Rc<dyn Fn(DirectoryEvent)>,
     ) -> LoadHandle {
+        LoadHandle::new(|| {})
+    }
+}
+
+impl FileSource for FilePreviewSource {
+    fn validate_location(&self, _location: &Location) -> Result<(), LocationValidationError> {
+        Ok(())
+    }
+
+    fn enumerate(&self, request: DirectoryRequest, emit: Rc<dyn Fn(DirectoryEvent)>) -> LoadHandle {
+        emit(DirectoryEvent::Batch {
+            request_id: request.id,
+            entries: vec![FileEntry {
+                location: Location::local("/fixture/example.conf"),
+                native_name: OsString::from("example.conf"),
+                display_name: "example.conf".into(),
+                kind: EntryKind::File,
+                size: MetadataValue::Known(12),
+                modified_unix_seconds: MetadataValue::Known(1),
+            }],
+        });
+        emit(DirectoryEvent::Finished {
+            request_id: request.id,
+        });
         LoadHandle::new(|| {})
     }
 }
@@ -479,6 +505,24 @@ fn committing_a_peek_descends_and_creates_history() {
         .filter(|event| matches!(event, BrowserEvent::Reset))
         .count();
     assert_eq!(resets, 2, "committing a peek must create a history entry");
+}
+
+#[test]
+fn activating_a_file_requests_a_preview_instead_of_opening_an_external_app() {
+    let browser = Browser::new(Rc::new(FilePreviewSource));
+    let events = Rc::new(RefCell::new(Vec::new()));
+    let observed = events.clone();
+    browser.observe(move |event| observed.borrow_mut().push(event));
+    browser.navigate(Location::local("/fixture"));
+    events.borrow_mut().clear();
+
+    browser.activate(0, 0);
+
+    assert!(events.borrow().iter().any(|event| matches!(
+        event,
+        BrowserEvent::PreviewRequested { entry }
+            if entry.location == Location::local("/fixture/example.conf")
+    )));
 }
 
 #[test]

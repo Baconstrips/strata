@@ -3,7 +3,7 @@
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use gtk::{gio, glib, prelude::*};
@@ -26,6 +26,7 @@ const TRANSITION: Duration = Duration::from_millis(260);
 struct PreviewState {
     provider: Rc<dyn PreviewProvider>,
     revealer: gtk::Revealer,
+    pane: gtk::Box,
     title: gtk::Label,
     size: gtk::Label,
     modified: gtk::Label,
@@ -38,7 +39,8 @@ struct PreviewState {
     next_request: Cell<u64>,
     opened: Cell<bool>,
     width: Cell<i32>,
-    transition_generation: Cell<u64>,
+    animating: Cell<bool>,
+    animation_generation: Rc<Cell<u64>>,
 }
 
 #[derive(Clone)]
@@ -92,7 +94,7 @@ impl PreviewDrawer {
 
         let revealer = gtk::Revealer::builder()
             .child(&pane)
-            .transition_duration(transition_duration().as_millis() as u32)
+            .transition_duration(0)
             .transition_type(gtk::RevealerTransitionType::SlideLeft)
             .reveal_child(false)
             .build();
@@ -100,6 +102,7 @@ impl PreviewDrawer {
         let state = Rc::new(PreviewState {
             provider,
             revealer,
+            pane,
             title,
             size,
             modified,
@@ -112,7 +115,8 @@ impl PreviewDrawer {
             next_request: Cell::new(1),
             opened: Cell::new(false),
             width: Cell::new(DEFAULT_WIDTH),
-            transition_generation: Cell::new(0),
+            animating: Cell::new(false),
+            animation_generation: Rc::new(Cell::new(0)),
         });
         let weak = Rc::downgrade(&state);
         close.connect_clicked(move |_| {
@@ -135,7 +139,7 @@ impl PreviewDrawer {
             let Some(state) = weak.upgrade() else {
                 return;
             };
-            if state.opened.get() {
+            if state.opened.get() && !state.animating.get() {
                 let available = split.width();
                 let width = available.saturating_sub(split.position());
                 let bounded = width.clamp(MIN_WIDTH, MAX_WIDTH);
@@ -170,43 +174,80 @@ impl PreviewDrawer {
 
 impl PreviewState {
     fn show(self: &Rc<Self>, entry: FileEntry) {
-        let generation = self.transition_generation.get().saturating_add(1);
-        self.transition_generation.set(generation);
-        self.opened.set(true);
-        if let Some(split) = self.split.borrow().as_ref() {
-            let available = split.width();
-            if available > MIN_WIDTH {
-                let width = self.width.get().clamp(MIN_WIDTH, MAX_WIDTH);
-                split.set_position(available.saturating_sub(width));
+        let was_open = self.opened.replace(true);
+        let already_showing = self.current.borrow().as_ref() == Some(&entry);
+        if !was_open {
+            self.revealer.set_transition_duration(0);
+            self.pane.set_size_request(0, -1);
+            self.revealer.set_reveal_child(true);
+            if let Some(split) = self.split.borrow().as_ref() {
+                self.animate_open(split);
             }
         }
-        self.revealer
-            .set_transition_duration(transition_duration().as_millis() as u32);
-        self.revealer.set_reveal_child(true);
-        self.load(entry);
+        if !was_open || !already_showing {
+            self.load(entry);
+        }
+    }
+
+    fn animate_open(self: &Rc<Self>, split: &gtk::Paned) {
+        let available = split.width();
+        if available <= MIN_WIDTH {
+            return;
+        }
+        let target = available.saturating_sub(self.width.get().clamp(MIN_WIDTH, MAX_WIDTH));
+        let start = available;
+        split.set_position(start);
+        let animation_id = self.animation_generation.get().saturating_add(1);
+        self.animation_generation.set(animation_id);
+        self.animating.set(true);
+
+        if !super::motion::animations_enabled() {
+            split.set_position(target);
+            self.pane.set_size_request(MIN_WIDTH, -1);
+            self.animating.set(false);
+            return;
+        }
+
+        let started = Instant::now();
+        let split = split.clone();
+        let pane = self.pane.clone();
+        let generation = self.animation_generation.clone();
+        let weak = Rc::downgrade(self);
+        let _tick = split.clone().add_tick_callback(move |_, _| {
+            if generation.get() != animation_id {
+                return glib::ControlFlow::Break;
+            }
+            let progress =
+                (started.elapsed().as_secs_f64() / TRANSITION.as_secs_f64()).clamp(0.0, 1.0);
+            let eased = super::motion::emphasized_deceleration(progress);
+            let position = f64::from(start) + f64::from(target - start) * eased;
+            split.set_position(position.round() as i32);
+            if progress >= 1.0 {
+                split.set_position(target);
+                pane.set_size_request(MIN_WIDTH, -1);
+                if let Some(state) = weak.upgrade() {
+                    state.animating.set(false);
+                }
+                glib::ControlFlow::Break
+            } else {
+                glib::ControlFlow::Continue
+            }
+        });
     }
 
     fn close(self: &Rc<Self>) {
         self.opened.set(false);
+        self.animating.set(false);
+        self.animation_generation
+            .set(self.animation_generation.get().saturating_add(1));
         self.current_request.set(None);
         self.load.borrow_mut().take();
-        let duration = transition_duration();
-        self.revealer
-            .set_transition_duration(duration.as_millis() as u32);
+        self.revealer.set_transition_duration(0);
         self.revealer.set_reveal_child(false);
-        let generation = self.transition_generation.get().saturating_add(1);
-        self.transition_generation.set(generation);
-        let weak = Rc::downgrade(self);
-        glib::timeout_add_local_once(duration, move || {
-            let Some(state) = weak.upgrade() else {
-                return;
-            };
-            if state.transition_generation.get() == generation && !state.opened.get() {
-                if let Some(split) = state.split.borrow().as_ref() {
-                    split.set_position(split.width());
-                }
-            }
-        });
+        if let Some(split) = self.split.borrow().as_ref() {
+            split.set_position(split.width());
+        }
+        self.pane.set_size_request(MIN_WIDTH, -1);
     }
 
     fn load(self: &Rc<Self>, entry: FileEntry) {
@@ -366,14 +407,6 @@ impl PreviewState {
         box_.append(&heading);
         box_.append(&detail);
         self.content.append(&box_);
-    }
-}
-
-fn transition_duration() -> Duration {
-    if super::motion::animations_enabled() {
-        TRANSITION
-    } else {
-        Duration::ZERO
     }
 }
 
