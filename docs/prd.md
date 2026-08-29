@@ -157,11 +157,14 @@ The first release supports:
 - Rename
 - Copy, cut, paste, move, and duplicate
 - Move to trash and permanent delete
-- Drag and drop
+- Drag and drop between locations within Strata
+- Drag files from Strata to external applications and desktop targets using interoperable formats
 - Progress, cancellation, and conflict resolution
 - Clear reporting of partial failures and permission errors
 
 Destructive actions must be deliberate. Permanent deletion requires stronger confirmation than moving to trash.
+
+A later operation-history milestone should add Undo and Redo where outcomes can be guaranteed. Both actions should have visible toolbar controls and configurable keyboard shortcuts. Strata must not advertise an operation as reversible when external changes, partial failures, or destructive semantics make that unsafe.
 
 ### 7.8 Keyboard navigation
 

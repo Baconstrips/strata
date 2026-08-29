@@ -219,6 +219,15 @@ impl Browser {
         }
     }
 
+    pub fn entry_at(&self, depth: usize, position: usize) -> Option<FileEntry> {
+        self.state.borrow().entry_at(depth, position)
+    }
+
+    pub fn activate(self: &Rc<Self>, depth: usize, position: usize) {
+        self.select(depth, position);
+        self.activate_focused();
+    }
+
     pub fn move_selection(&self, direction: i32) {
         if let Some((depth, position)) = self.state.borrow_mut().move_selection(direction) {
             self.emit(BrowserEvent::FocusChanged {

@@ -9,6 +9,10 @@ use crate::{adapters::LocalFileSource, app::Browser, model::Location};
 use super::browser::{BrowserView, PeekBehavior};
 
 pub fn present(application: &gtk::Application) {
+    present_location(application, None);
+}
+
+pub fn present_location(application: &gtk::Application, location: Option<PathBuf>) {
     crate::assets::register_icon_theme();
     load_styles();
 
@@ -81,11 +85,12 @@ pub fn present(application: &gtk::Application) {
 
     window.set_child(Some(&root));
     install_keyboard_navigation(&window, &controller);
-    browser.navigate(home_directory());
+    browser.navigate(location.unwrap_or_else(home_directory));
 
     let browser_controller = browser.browser();
     window.connect_destroy(move |_| browser_controller.clear_observer());
     window.present();
+    crate::metrics::mark_window_presented();
 }
 
 fn install_keyboard_navigation(window: &gtk::ApplicationWindow, browser: &Rc<Browser>) {

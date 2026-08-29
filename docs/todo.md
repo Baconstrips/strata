@@ -20,9 +20,9 @@ Legend: **P0** blocks the milestone, **P1** is required for its exit criteria, *
 
 - [x] Add PRD, roadmap, work breakdown, and architecture principles
 - [x] **P0** Create deterministic fixture generator for 1k, 10k, and 100k entries
-- [ ] **P0** Record startup, first-render, navigation, and large-directory baselines
+- [x] **P0** Record startup, first-render, navigation, and large-directory baselines
 - [x] **P0** Add structured logging with request IDs and timings
-- [ ] **P1** Add contributor development commands and pre-commit guidance
+- [x] **P1** Add contributor development commands and pre-commit guidance
 - [ ] **P1** Add issue and pull-request templates
 
 ### Models and state
@@ -132,11 +132,13 @@ Legend: **P0** blocks the milestone, **P1** is required for its exit criteria, *
 - [ ] **P1** Cross-device move behavior
 - [ ] **P1** Disk-full, permissions, disappearing source, and read-only tests
 - [ ] **P2** Limited undo where behavior can be guaranteed
+- [ ] **P2** Future Undo/Redo operation history with toolbar buttons and configurable keyboard shortcuts
 
 ### Desktop interoperability
 
 - [ ] **P0** Copy/cut/paste with interoperable file-manager clipboard formats
-- [ ] **P0** Internal and external drag and drop
+- [ ] **P0** Drag and drop between locations within Strata
+- [ ] **P0** Drag files from Strata to external applications and desktop targets using interoperable formats
 - [ ] **P1** Removable media mount, unmount, and disconnect states
 - [ ] **P1** Notifications for completed long-running operations
 

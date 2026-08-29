@@ -40,6 +40,8 @@ impl FileSource for LocalFileSource {
                 }
             };
 
+            let mut total_entries = 0usize;
+            let mut first_batch = true;
             loop {
                 match enumerator
                     .next_files_future(request.batch_size as i32, glib::Priority::DEFAULT)
@@ -48,6 +50,7 @@ impl FileSource for LocalFileSource {
                     Ok(files) if files.is_empty() => {
                         tracing::info!(
                             request_id = request_id.0,
+                            entries = total_entries,
                             elapsed_ms = started.elapsed().as_millis() as u64,
                             "directory load finished"
                         );
@@ -82,6 +85,16 @@ impl FileSource for LocalFileSource {
                         entries.sort_unstable_by_key(|entry| {
                             (!entry.is_directory(), entry.display_name.to_lowercase())
                         });
+                        total_entries += entries.len();
+                        if first_batch {
+                            tracing::info!(
+                                request_id = request_id.0,
+                                entries = entries.len(),
+                                elapsed_ms = started.elapsed().as_millis() as u64,
+                                "first directory batch ready"
+                            );
+                            first_batch = false;
+                        }
                         emit(DirectoryEvent::Batch {
                             request_id,
                             entries,

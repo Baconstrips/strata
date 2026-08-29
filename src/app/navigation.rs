@@ -279,6 +279,10 @@ impl NavigationState {
         Some((depth, self.columns[depth].selected))
     }
 
+    pub fn entry_at(&self, depth: usize, position: usize) -> Option<FileEntry> {
+        self.columns.get(depth)?.entries.get(position).cloned()
+    }
+
     pub fn focused_entry(&self) -> Option<(usize, usize, FileEntry)> {
         let depth = self.active_column?;
         let column = self.columns.get(depth)?;

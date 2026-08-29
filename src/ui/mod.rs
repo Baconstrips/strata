@@ -3,4 +3,4 @@
 mod browser;
 mod window;
 
-pub use window::present;
+pub use window::{present, present_location};

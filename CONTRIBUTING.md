@@ -46,6 +46,18 @@ cargo install --locked cargo-deny
 cargo install --locked typos-cli
 ```
 
+## Performance fixtures
+
+Generate and profile deterministic large directories with:
+
+```bash
+./scripts/generate-fixture.sh target/fixtures
+cargo build --release
+STRATA_BINARY=target/release/strata ./scripts/profile-fixture.sh target/fixtures/100000
+```
+
+See [the performance baseline](docs/performance-baseline.md) for recorded results and measurement guidance.
+
 ## Engineering expectations
 
 - Keep filesystem, search, preview, and operation work off the GTK thread.

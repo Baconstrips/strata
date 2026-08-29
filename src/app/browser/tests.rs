@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use std::ffi::OsString;
+use std::{cell::Cell, ffi::OsString};
 
 use super::*;
 use crate::{
@@ -9,6 +9,21 @@ use crate::{
 };
 
 struct FakeFileSource;
+
+struct TrackingFileSource {
+    cancellations: Rc<Cell<usize>>,
+}
+
+impl FileSource for TrackingFileSource {
+    fn enumerate(
+        &self,
+        _request: DirectoryRequest,
+        _emit: Rc<dyn Fn(DirectoryEvent)>,
+    ) -> LoadHandle {
+        let cancellations = self.cancellations.clone();
+        LoadHandle::new(move || cancellations.set(cancellations.get() + 1))
+    }
+}
 
 impl FileSource for FakeFileSource {
     fn enumerate(&self, request: DirectoryRequest, emit: Rc<dyn Fn(DirectoryEvent)>) -> LoadHandle {
@@ -28,6 +43,19 @@ impl FileSource for FakeFileSource {
         });
         LoadHandle::new(|| {})
     }
+}
+
+#[test]
+fn navigating_away_cancels_the_previous_directory_request() {
+    let cancellations = Rc::new(Cell::new(0));
+    let browser = Browser::new(Rc::new(TrackingFileSource {
+        cancellations: cancellations.clone(),
+    }));
+
+    browser.navigate(Location::local("/first"));
+    browser.navigate(Location::local("/second"));
+
+    assert_eq!(cancellations.get(), 1);
 }
 
 #[test]

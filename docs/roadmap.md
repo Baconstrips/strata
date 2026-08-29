@@ -35,7 +35,7 @@ The roadmap is ordered by risk and dependency rather than by visual prominence. 
 - Open/Open With, create, and rename
 - Copy, cut, paste, move, duplicate, trash, and delete
 - Operation queue with progress, cancellation, conflicts, and partial failures
-- Clipboard interoperability and drag and drop
+- Clipboard interoperability and drag and drop within Strata and from Strata to external targets
 - Mounts, removable media, Trash, and permission/error states
 
 **Exit:** Core local workflows can be completed without another file manager.
@@ -91,3 +91,4 @@ The roadmap is ordered by risk and dependency rather than by visual prominence. 
 - Global indexed search
 - Out-of-process or sandboxed extensions
 - Optional developer integrations such as Git status
+- Undo/Redo operation history with toolbar buttons and keyboard shortcuts where reversal can be guaranteed

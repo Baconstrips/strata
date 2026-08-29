@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use std::{cell::RefCell, path::Path, rc::Rc, time::Duration};
+use std::{
+    cell::{Cell, RefCell},
+    path::Path,
+    rc::Rc,
+    time::{Duration, Instant},
+};
 
 use gtk::{gio, glib, prelude::*};
 
@@ -15,7 +20,7 @@ struct ColumnView {
     model: gtk::StringList,
     selection: gtk::SingleSelection,
     list: gtk::ListView,
-    entries: Rc<RefCell<Vec<FileEntry>>>,
+    entry_count: Rc<Cell<usize>>,
     spinner: gtk::Spinner,
 }
 
@@ -23,7 +28,7 @@ struct PeekView {
     revealer: gtk::Revealer,
     location: Location,
     model: gtk::StringList,
-    entries: Rc<RefCell<Vec<FileEntry>>>,
+    entry_count: Rc<Cell<usize>>,
     spinner: gtk::Spinner,
 }
 
@@ -126,22 +131,26 @@ impl ViewState {
             BrowserEvent::ColumnsTruncated { len } => self.truncate(len),
             BrowserEvent::ColumnAdded { depth, location } => self.append_column(depth, &location),
             BrowserEvent::EntriesAdded { depth, entries } => {
+                let render_started = Instant::now();
+                let entry_count = entries.len();
                 if let Some(column) = self.columns.borrow().get(depth).cloned() {
-                    let mut stored = column.entries.borrow_mut();
                     for entry in entries {
                         let prefix = if entry.is_directory() { "▸  " } else { "   " };
                         column
                             .model
                             .append(&format!("{prefix}{}", entry.display_name));
-                        stored.push(entry);
                     }
+                    column
+                        .entry_count
+                        .set(column.entry_count.get() + entry_count);
+                    crate::metrics::mark_batch_rendered(entry_count, render_started);
                 }
             }
             BrowserEvent::LoadFinished { depth } => {
                 if let Some(column) = self.columns.borrow().get(depth) {
                     column.spinner.stop();
                     column.spinner.set_visible(false);
-                    if column.entries.borrow().is_empty() {
+                    if column.entry_count.get() == 0 {
                         column.model.append("This directory is empty");
                     }
                 }
@@ -158,7 +167,7 @@ impl ViewState {
                 if let Some(peek) = self.peek.borrow().as_ref() {
                     append_entries(
                         &peek.model,
-                        &peek.entries,
+                        &peek.entry_count,
                         entries,
                         Some(self.peek_behavior.item_limit),
                     );
@@ -168,7 +177,7 @@ impl ViewState {
                 if let Some(peek) = self.peek.borrow().as_ref() {
                     peek.spinner.stop();
                     peek.spinner.set_visible(false);
-                    if peek.entries.borrow().is_empty() {
+                    if peek.entry_count.get() == 0 {
                         peek.model.append("This directory is empty");
                     }
                 }
@@ -214,14 +223,13 @@ impl ViewState {
         header.append(&spinner);
         column.append(&header);
 
-        let entries = Rc::new(RefCell::new(Vec::<FileEntry>::new()));
+        let entry_count = Rc::new(Cell::new(0));
         let model = gtk::StringList::new(&[]);
         let selection = gtk::SingleSelection::new(Some(model.clone()));
         selection.set_autoselect(false);
 
         let factory = gtk::SignalListItemFactory::new();
         let weak_state = Rc::downgrade(self);
-        let hover_entries = entries.clone();
         factory.connect_setup(move |_, item| {
             let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
                 return;
@@ -234,17 +242,18 @@ impl ViewState {
                 .build();
             let motion = gtk::EventControllerMotion::new();
             let list_item = item.clone();
-            let entries = hover_entries.clone();
             let anchor: gtk::Widget = label.clone().upcast();
             let weak_state_for_enter = weak_state.clone();
             motion.connect_enter(move |_, _, _| {
-                let entry = entries.borrow().get(list_item.position() as usize).cloned();
-                if let (Some(state), Some(entry)) = (weak_state_for_enter.upgrade(), entry) {
-                    if entry.is_directory() {
-                        state.schedule_peek(depth, entry.location, anchor.clone());
-                    } else {
-                        cancel_source(&state.pending_peek);
-                        state.browser.close_peek();
+                if let Some(state) = weak_state_for_enter.upgrade() {
+                    let entry = state.browser.entry_at(depth, list_item.position() as usize);
+                    if let Some(entry) = entry {
+                        if entry.is_directory() {
+                            state.schedule_peek(depth, entry.location, anchor.clone());
+                        } else {
+                            cancel_source(&state.pending_peek);
+                            state.browser.close_peek();
+                        }
                     }
                 }
             });
@@ -276,23 +285,9 @@ impl ViewState {
         list.set_vexpand(true);
 
         let weak_browser = Rc::downgrade(&self.browser);
-        let entries_for_activate = entries.clone();
         list.connect_activate(move |_, position| {
-            let entry = entries_for_activate
-                .borrow()
-                .get(position as usize)
-                .cloned();
-            let Some(entry) = entry else {
-                return;
-            };
-            let Some(browser) = weak_browser.upgrade() else {
-                return;
-            };
-            browser.select(depth, position as usize);
-            if entry.is_directory() {
-                browser.descend(depth, entry.location);
-            } else {
-                open_file(entry.location.path());
+            if let Some(browser) = weak_browser.upgrade() {
+                browser.activate(depth, position as usize);
             }
         });
 
@@ -314,7 +309,7 @@ impl ViewState {
             model,
             selection,
             list,
-            entries,
+            entry_count,
             spinner,
         });
 
@@ -396,7 +391,7 @@ impl ViewState {
         header.append(&spinner);
         content.append(&header);
 
-        let entries = Rc::new(RefCell::new(Vec::<FileEntry>::new()));
+        let entry_count = Rc::new(Cell::new(0));
         let model = gtk::StringList::new(&[]);
         let selection = gtk::NoSelection::new(Some(model.clone()));
         let factory = basic_label_factory();
@@ -473,7 +468,7 @@ impl ViewState {
             revealer: revealer.clone(),
             location: location.clone(),
             model,
-            entries,
+            entry_count,
             spinner,
         }));
         glib::idle_add_local_once(move || revealer.set_reveal_child(true));
@@ -533,19 +528,20 @@ fn basic_label_factory() -> gtk::SignalListItemFactory {
 
 fn append_entries(
     model: &gtk::StringList,
-    stored: &Rc<RefCell<Vec<FileEntry>>>,
+    stored_count: &Rc<Cell<usize>>,
     entries: Vec<FileEntry>,
     limit: Option<usize>,
 ) {
-    let mut stored = stored.borrow_mut();
     let remaining = limit
-        .map(|limit| limit.max(1).saturating_sub(stored.len()))
+        .map(|limit| limit.max(1).saturating_sub(stored_count.get()))
         .unwrap_or(entries.len());
+    let mut appended = 0;
     for entry in entries.into_iter().take(remaining) {
         let prefix = if entry.is_directory() { "▸  " } else { "   " };
         model.append(&format!("{prefix}{}", entry.display_name));
-        stored.push(entry);
+        appended += 1;
     }
+    stored_count.set(stored_count.get() + appended);
 }
 
 fn cancel_source(source: &RefCell<Option<glib::SourceId>>) {
