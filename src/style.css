@@ -7,10 +7,10 @@ window {
 
 headerbar {
   background: @theme_surface;
-  border-bottom: 1px solid alpha(@theme_border, 0.4);
+  border-bottom: 1px solid alpha(@theme_border, 0.6);
   box-shadow: none;
-  min-height: 30px;
-  padding: 0 3px;
+  min-height: 54px;
+  padding: 0 8px;
 }
 
 .location-control {
@@ -29,9 +29,9 @@ headerbar menubutton.header-action > button {
   border: none;
   border-radius: 5px;
   box-shadow: none;
-  min-height: 22px;
-  min-width: 22px;
-  padding: 2px;
+  min-height: 30px;
+  min-width: 30px;
+  padding: 5px;
 }
 
 headerbar .sidebar-toggle:hover,
@@ -54,7 +54,7 @@ headerbar menubutton.header-action > button:checked {
 }
 
 headerbar image {
-  -gtk-icon-size: 16px;
+  -gtk-icon-size: 20px;
 }
 
 headerbar button.header-action,
@@ -168,7 +168,7 @@ headerbar menubutton.header-action > button:checked {
   min-height: 22px;
   min-width: 22px;
   opacity: 0;
-  padding: 2px;
+  padding: 2px 4px;
 }
 
 .current-breadcrumb:hover .copy-path,
@@ -323,7 +323,7 @@ switch:checked slider {
 
 .sidebar {
   background: @theme_surface;
-  border-right: 1px solid alpha(@theme_border, 0.4);
+  border-right: 1px solid alpha(@theme_border, 0.6);
   padding: 8px 7px;
 }
 
@@ -344,7 +344,7 @@ switch:checked slider {
 .sidebar-row.active,
 .sidebar-row.active:hover {
   background: alpha(@theme_highlight, 0.82);
-  color: @theme_accent;
+  color: @theme_text;
 }
 
 .sidebar-row.reorderable.dragging {
@@ -373,7 +373,7 @@ switch:checked slider {
 }
 
 paned > separator {
-  background: alpha(@theme_border, 0.4);
+  background: alpha(@theme_border, 0.6);
   min-width: 1px;
 }
 
@@ -385,7 +385,7 @@ paned > separator {
 .directory-column {
   background: @theme_bg;
   color: @theme_text;
-  border-right: 1px solid alpha(@theme_border, 0.4);
+  border-right: 1px solid alpha(@theme_border, 0.6);
 }
 
 .directory-column scrolledwindow,
@@ -417,10 +417,10 @@ paned > separator {
 
 .column-header {
   background: @theme_bg;
-  border-bottom: 1px solid alpha(@theme_border, 0.4);
+  border-bottom: 1px solid alpha(@theme_border, 0.6);
   color: @theme_accent;
   font-weight: 700;
-  min-height: 30px;
+  min-height: 36px;
   padding: 4px 8px 4px 12px;
 }
 
@@ -456,7 +456,7 @@ menubutton.column-header-action > button:checked image {
 
 .column-filter {
   background: @theme_bg;
-  border-bottom: 1px solid alpha(@theme_border, 0.4);
+  border-bottom: 1px solid alpha(@theme_border, 0.6);
   min-height: 30px;
   padding: 0 11px;
 }
