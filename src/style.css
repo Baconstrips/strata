@@ -518,13 +518,21 @@ paned > separator {
 .directory-column {
   background: @theme_bg;
   color: @theme_text;
-  border-right: 1px solid alpha(@theme_border, 0.6);
 }
 
 .directory-column scrolledwindow,
 .directory-column viewport,
 .directory-column listview {
   background: @theme_bg;
+}
+
+.column-resize-handle {
+  background: transparent;
+  border-left: 1px solid alpha(@theme_border, 0.6);
+}
+
+.column-resize-handle:hover {
+  border-left-color: @theme_accent;
 }
 
 .peek-popover {

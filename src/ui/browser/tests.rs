@@ -32,6 +32,13 @@ fn file_names_map_to_specific_lucide_icons() {
 }
 
 #[test]
+fn pane_resizing_preserves_the_initial_minimum_width() {
+    assert_eq!(resized_column_width(COLUMN_WIDTH, -80.0), COLUMN_WIDTH);
+    assert_eq!(resized_column_width(COLUMN_WIDTH, 75.0), 375);
+    assert_eq!(resized_column_width(420, -20.0), 400);
+}
+
+#[test]
 fn reveal_target_scrolls_only_enough_to_show_the_new_column() {
     assert_eq!(
         horizontal_reveal_target(0.0, 900.0, 0.0, 1_200.0, 900.0, 1_200.0),

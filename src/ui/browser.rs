@@ -360,7 +360,12 @@ impl BrowserView {
     }
 
     pub fn occupied_width(&self) -> i32 {
-        (self.state.columns.borrow().len() as i32).saturating_mul(COLUMN_WIDTH)
+        self.state
+            .columns
+            .borrow()
+            .iter()
+            .map(|column| column.shell.width().max(COLUMN_WIDTH))
+            .fold(0, i32::saturating_add)
     }
 
     pub fn location_widget(&self) -> gtk::Widget {
@@ -1388,6 +1393,40 @@ impl ViewState {
         shell.set_vexpand(true);
         shell.set_overflow(gtk::Overflow::Hidden);
         shell.append(&column);
+        let resize_handle = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        resize_handle.add_css_class("column-resize-handle");
+        resize_handle.set_width_request(7);
+        resize_handle.set_cursor_from_name(Some("col-resize"));
+        let resize = gtk::GestureDrag::new();
+        resize.set_button(1);
+        let resize_start = Rc::new(Cell::new(COLUMN_WIDTH));
+        let pointer_start = Rc::new(Cell::new(None));
+        let shell_for_resize_start = shell.clone();
+        let resize_start_for_begin = resize_start.clone();
+        let pointer_start_for_begin = pointer_start.clone();
+        resize.connect_drag_begin(move |gesture, _, _| {
+            resize_start_for_begin.set(shell_for_resize_start.width().max(COLUMN_WIDTH));
+            if let Some((pointer_x, _)) = gesture.current_event().and_then(|event| event.position())
+            {
+                pointer_start_for_begin.set(Some(pointer_x));
+            }
+            gesture.set_state(gtk::EventSequenceState::Claimed);
+        });
+        let shell_for_resize = shell.clone();
+        resize.connect_drag_update(move |gesture, fallback_offset_x, _| {
+            let pointer_x = gesture
+                .current_event()
+                .and_then(|event| event.position())
+                .map(|(pointer_x, _)| pointer_x);
+            let offset_x = pointer_start
+                .get()
+                .zip(pointer_x)
+                .map_or(fallback_offset_x, |(start, current)| current - start);
+            shell_for_resize
+                .set_size_request(resized_column_width(resize_start.get(), offset_x), -1);
+        });
+        resize_handle.add_controller(resize);
+        shell.append(&resize_handle);
         let animation_generation = Rc::new(Cell::new(0));
         let previous = depth
             .checked_sub(1)
@@ -2043,6 +2082,12 @@ fn animate_column_entry(shell: &gtk::Box, column: &gtk::Box, generation: &Rc<Cel
             glib::ControlFlow::Continue
         }
     });
+}
+
+fn resized_column_width(initial_width: i32, horizontal_offset: f64) -> i32 {
+    (f64::from(initial_width) + horizontal_offset)
+        .round()
+        .max(f64::from(COLUMN_WIDTH)) as i32
 }
 
 fn horizontal_reveal_target(
