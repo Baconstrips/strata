@@ -43,6 +43,7 @@ struct ColumnView {
     model: gtk::StringList,
     filtered_model: gtk::FilterListModel,
     filter_entry: gtk::Entry,
+    filter_button: gtk::ToggleButton,
     selection: gtk::SingleSelection,
     list: gtk::ListView,
     bound_rows: Rc<RefCell<Vec<BoundRow>>>,
@@ -346,6 +347,19 @@ impl BrowserView {
             cancel_source(&self.state.pending_peek);
             self.state.browser.close_peek();
         }
+    }
+
+    pub fn dismiss_focused_filter(&self) -> bool {
+        let columns = self.state.columns.borrow();
+        let Some(column) = columns
+            .iter()
+            .find(|column| column.filter_entry.has_focus())
+        else {
+            return false;
+        };
+        column.filter_button.set_active(false);
+        column.list.grab_focus();
+        true
     }
 }
 
@@ -946,6 +960,7 @@ impl ViewState {
             model,
             filtered_model,
             filter_entry,
+            filter_button,
             selection,
             list,
             bound_rows,

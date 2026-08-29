@@ -54,6 +54,7 @@ pub fn build_layer(
         .tooltip_text("Close settings")
         .build();
     close.add_css_class("settings-close");
+    close.set_valign(gtk::Align::Center);
     titlebar.append(&title);
     titlebar.append(&close);
     page.append(&titlebar);
@@ -195,6 +196,7 @@ fn theme_page(manager: Rc<ThemeManager>) -> gtk::Widget {
         icon.add_css_class("system-theme-icon");
         let copy = gtk::Box::new(gtk::Orientation::Vertical, 2);
         copy.set_hexpand(true);
+        copy.set_valign(gtk::Align::Center);
         let system_title = gtk::Label::new(Some("Follow Omarchy"));
         system_title.set_xalign(0.0);
         system_title.add_css_class("settings-option-title");
@@ -297,10 +299,18 @@ fn append_theme_card(
     card.set_has_frame(false);
     card.set_overflow(gtk::Overflow::Visible);
     let content = gtk::Box::new(gtk::Orientation::Vertical, 6);
-    content.append(&theme_preview(&theme.tokens));
+    let preview = gtk::Overlay::new();
+    preview.set_child(Some(&theme_preview(&theme.tokens)));
+    let check = gtk::Image::from_icon_name(icons::CHECK_ON_PRIMARY);
+    check.add_css_class("theme-card-check");
+    check.set_halign(gtk::Align::End);
+    check.set_valign(gtk::Align::Start);
+    check.set_margin_top(8);
+    check.set_margin_end(8);
+    check.set_pixel_size(10);
+    preview.add_overlay(&check);
+    content.append(&preview);
     let label_row = gtk::Box::new(gtk::Orientation::Horizontal, 7);
-    let check = gtk::Image::from_icon_name(icons::CHECK);
-    check.set_pixel_size(14);
     let selected = !manager.follows_omarchy() && manager.selected_id() == theme.id;
     check.set_visible(selected);
     if selected {
@@ -309,7 +319,6 @@ fn append_theme_card(
     let label = gtk::Label::new(Some(&theme.tokens.name));
     label.set_xalign(0.0);
     label.set_ellipsize(gtk::pango::EllipsizeMode::End);
-    label_row.append(&check);
     label_row.append(&label);
     content.append(&label_row);
     card.set_child(Some(&content));
@@ -556,6 +565,7 @@ fn settings_option(title: &str, description: &str, active: bool) -> (gtk::Box, g
     row.add_css_class("settings-option");
     let copy = gtk::Box::new(gtk::Orientation::Vertical, 2);
     copy.set_hexpand(true);
+    copy.set_valign(gtk::Align::Center);
     let title = gtk::Label::new(Some(title));
     title.set_xalign(0.0);
     title.add_css_class("settings-option-title");

@@ -12,6 +12,7 @@ use gtk::{gdk, gio, glib};
 pub mod icons {
     pub const ARROW_UP_DOWN: &str = "strata-arrow-up-down";
     pub const CHECK: &str = "strata-check";
+    pub const CHECK_ON_PRIMARY: &str = "strata-check-on-primary";
     pub const CHEVRON_RIGHT: &str = "strata-chevron-right";
     pub const COPY: &str = "strata-copy";
     pub const DOCUMENTS: &str = "strata-file-text";

@@ -7,7 +7,7 @@ window {
 
 headerbar {
   background: @theme_surface;
-  border-bottom: 1px solid alpha(@theme_border, 0.24);
+  border-bottom: 1px solid alpha(@theme_border, 0.4);
   box-shadow: none;
   min-height: 30px;
   padding: 0 3px;
@@ -293,6 +293,8 @@ switch {
   background: @theme_muted;
   border: 1px solid alpha(@theme_border, 0.72);
   box-shadow: none;
+  min-height: 22px;
+  min-width: 40px;
 }
 
 switch:checked {
@@ -305,6 +307,8 @@ switch:checked slider {
   background: #ffffff;
   border: none;
   box-shadow: 0 1px 3px alpha(#000000, 0.4);
+  min-height: 18px;
+  min-width: 18px;
 }
 
 .sidebar-scroll,
@@ -314,7 +318,7 @@ switch:checked slider {
 
 .sidebar {
   background: @theme_surface;
-  border-right: 1px solid alpha(@theme_border, 0.24);
+  border-right: 1px solid alpha(@theme_border, 0.4);
   padding: 8px 7px;
 }
 
@@ -357,13 +361,20 @@ switch:checked slider {
   min-height: 1px;
 }
 
+paned > separator {
+  background: alpha(@theme_border, 0.4);
+  min-width: 1px;
+}
+
 .columns {
   background: @theme_bg;
+  color: @theme_text;
 }
 
 .directory-column {
   background: @theme_bg;
-  border-right: 1px solid alpha(@theme_border, 0.24);
+  color: @theme_text;
+  border-right: 1px solid alpha(@theme_border, 0.4);
 }
 
 .directory-column scrolledwindow,
@@ -395,7 +406,7 @@ switch:checked slider {
 
 .column-header {
   background: @theme_bg;
-  border-bottom: 1px solid alpha(@theme_border, 0.24);
+  border-bottom: 1px solid alpha(@theme_border, 0.4);
   color: @theme_accent;
   font-weight: 700;
   min-height: 30px;
@@ -434,7 +445,7 @@ menubutton.column-header-action > button:checked image {
 
 .column-filter {
   background: @theme_bg;
-  border-bottom: 1px solid alpha(@theme_border, 0.24);
+  border-bottom: 1px solid alpha(@theme_border, 0.4);
   min-height: 30px;
   padding: 0 11px;
 }
@@ -491,10 +502,12 @@ menubutton.column-header-action > button:checked image {
 
 .file-list {
   background: @theme_bg;
+  color: @theme_text;
 }
 
 .file-list row {
   background: transparent;
+  color: @theme_text;
   border-radius: 6px;
   margin: 1px 8px;
   padding: 0;
@@ -502,11 +515,13 @@ menubutton.column-header-action > button:checked image {
 
 .file-row {
   border-radius: 6px;
+  color: @theme_text;
   padding: 4px;
 }
 
 .file-list row:hover {
-  background: alpha(@theme_muted, 0.45);
+  background: alpha(@theme_muted, 0.65);
+  color: @theme_text;
 }
 
 .file-icon {
@@ -538,7 +553,8 @@ menubutton.column-header-action > button:checked image {
 }
 
 .file-list row:selected {
-  background: alpha(@theme_muted, 0.45);
+  background: alpha(@theme_muted, 0.65);
+  color: @theme_text;
 }
 
 .file-list .file-row.active-path {
@@ -632,9 +648,14 @@ menubutton.column-header-action > button:checked image {
   box-shadow: 0 0 13px alpha(@theme_accent, 0.32);
 }
 
-.theme-card image {
-  color: @theme_accent;
-  margin-left: 6px;
+.theme-card-check {
+  background: @theme_accent;
+  border: none;
+  border-radius: 999px;
+  box-shadow: 0 0 5px alpha(@theme_accent, 0.32);
+  min-height: 14px;
+  min-width: 14px;
+  padding: 0;
 }
 
 .theme-preview {
@@ -684,20 +705,31 @@ menubutton.column-header-action > button:checked image {
   opacity: 1;
 }
 
-.theme-color-picker {
-  background: @theme_bg;
-  border: 1px solid alpha(@theme_border, 0.75);
+.theme-color-picker,
+.theme-color-picker:hover,
+.theme-color-picker:focus {
+  background: transparent;
+  border: none;
   box-shadow: none;
   min-height: 30px;
   min-width: 38px;
-  padding: 2px;
+  padding: 0;
 }
 
-.theme-color-picker:hover,
-.theme-color-picker:focus {
-  background: @theme_muted;
+.theme-color-picker button {
+  background: transparent;
+  border: 1px solid alpha(@theme_border, 0.7);
+  box-shadow: none;
+  padding: 0;
+}
+
+.theme-color-picker button:hover,
+.theme-color-picker button:focus,
+.theme-color-picker button:active {
+  background: transparent;
   border-color: @theme_accent;
-  box-shadow: 0 0 0 1px alpha(@theme_accent, 0.3);
+  box-shadow: none;
+  padding: 0;
 }
 
 .theme-editor-cancel,

@@ -203,6 +203,9 @@ fn install_keyboard_navigation(
         };
         let alt = modifiers.contains(gtk::gdk::ModifierType::ALT_MASK);
         let control = modifiers.contains(gtk::gdk::ModifierType::CONTROL_MASK);
+        if key == gtk::gdk::Key::Escape && view.dismiss_focused_filter() {
+            return glib::Propagation::Stop;
+        }
         if control && key == gtk::gdk::Key::l {
             view.begin_location_edit();
             return glib::Propagation::Stop;

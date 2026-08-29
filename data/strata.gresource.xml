@@ -3,6 +3,7 @@
   <gresource prefix="/io/github/lgse/Strata">
     <file>icons/scalable/actions/strata-arrow-up-down.svg</file>
     <file>icons/scalable/actions/strata-check.svg</file>
+    <file>icons/scalable/actions/strata-check-on-primary.svg</file>
     <file>icons/scalable/actions/strata-chevron-right.svg</file>
     <file>icons/scalable/actions/strata-copy.svg</file>
     <file>icons/scalable/actions/strata-download.svg</file>
