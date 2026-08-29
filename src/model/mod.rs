@@ -27,6 +27,39 @@ impl Location {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SortKey {
+    Name,
+    Type,
+    Size,
+    Modified,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SortDirection {
+    Ascending,
+    Descending,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ViewPreferences {
+    pub show_hidden: bool,
+    pub folders_first: bool,
+    pub sort_key: SortKey,
+    pub sort_direction: SortDirection,
+}
+
+impl Default for ViewPreferences {
+    fn default() -> Self {
+        Self {
+            show_hidden: false,
+            folders_first: true,
+            sort_key: SortKey::Name,
+            sort_direction: SortDirection::Ascending,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum EntryKind {
     Directory,
     File,

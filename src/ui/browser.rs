@@ -130,20 +130,51 @@ impl ViewState {
             BrowserEvent::Reset => self.truncate(0),
             BrowserEvent::ColumnsTruncated { len } => self.truncate(len),
             BrowserEvent::ColumnAdded { depth, location } => self.append_column(depth, &location),
-            BrowserEvent::EntriesAdded { depth, entries } => {
+            BrowserEvent::EntriesInserted { depth, insertions } => {
                 let render_started = Instant::now();
-                let entry_count = entries.len();
+                let entry_count = insertions
+                    .iter()
+                    .map(|insertion| insertion.entries.len())
+                    .sum();
                 if let Some(column) = self.columns.borrow().get(depth).cloned() {
-                    for entry in entries {
-                        let prefix = if entry.is_directory() { "▸  " } else { "   " };
-                        column
-                            .model
-                            .append(&format!("{prefix}{}", entry.display_name));
+                    for insertion in insertions {
+                        let labels: Vec<_> = insertion
+                            .entries
+                            .iter()
+                            .map(|entry| {
+                                let prefix = if entry.is_directory() { "▸  " } else { "   " };
+                                format!("{prefix}{}", entry.display_name)
+                            })
+                            .collect();
+                        let labels: Vec<_> = labels.iter().map(String::as_str).collect();
+                        column.model.splice(insertion.position as u32, 0, &labels);
                     }
                     column
                         .entry_count
                         .set(column.entry_count.get() + entry_count);
                     crate::metrics::mark_batch_rendered(entry_count, render_started);
+                }
+            }
+            BrowserEvent::EntriesReplaced { depth, entries } => {
+                if let Some(column) = self.columns.borrow().get(depth).cloned() {
+                    let labels: Vec<_> = entries
+                        .iter()
+                        .map(|entry| {
+                            let prefix = if entry.is_directory() { "▸  " } else { "   " };
+                            format!("{prefix}{}", entry.display_name)
+                        })
+                        .collect();
+                    let labels: Vec<_> = labels.iter().map(String::as_str).collect();
+                    column.model.splice(0, column.model.n_items(), &labels);
+                    column.entry_count.set(entries.len());
+                }
+            }
+            BrowserEvent::ColumnReloaded { depth } => {
+                if let Some(column) = self.columns.borrow().get(depth) {
+                    column.model.splice(0, column.model.n_items(), &[]);
+                    column.entry_count.set(0);
+                    column.spinner.set_visible(true);
+                    column.spinner.start();
                 }
             }
             BrowserEvent::LoadFinished { depth } => {
@@ -190,6 +221,14 @@ impl ViewState {
                 }
             }
             BrowserEvent::PeekClosed => self.close_peek_visual(),
+            BrowserEvent::SelectionChanged { depth, position } => {
+                if let Some(column) = self.columns.borrow().get(depth) {
+                    column.selection.set_selected(position as u32);
+                    column
+                        .list
+                        .scroll_to(position as u32, gtk::ListScrollFlags::NONE, None);
+                }
+            }
             BrowserEvent::FocusChanged { depth, position } => {
                 if let Some(column) = self.columns.borrow().get(depth) {
                     if let Some(position) = position {

@@ -10,10 +10,14 @@ fn location(path: &str) -> Location {
 }
 
 fn entry(path: &str) -> FileEntry {
+    named_entry(path, "child")
+}
+
+fn named_entry(path: &str, name: &str) -> FileEntry {
     FileEntry {
         location: location(path),
-        native_name: OsString::from("child"),
-        display_name: "child".into(),
+        native_name: OsString::from(name),
+        display_name: name.into(),
         kind: EntryKind::Directory,
         size: MetadataValue::Unknown,
         modified_unix_seconds: MetadataValue::Unknown,
@@ -39,9 +43,10 @@ fn stale_batches_are_rejected() {
     state.navigate(location("/home"), RequestId(1));
     state.navigate(location("/tmp"), RequestId(2));
 
-    assert_eq!(
-        state.apply_batch(RequestId(1), &[entry("/home/child")]),
-        None
+    assert!(
+        state
+            .apply_batch(RequestId(1), vec![entry("/home/child")])
+            .is_none()
     );
     assert!(state.columns[0].entries.is_empty());
 }
@@ -91,7 +96,7 @@ fn parent_removes_the_deepest_committed_column() {
 fn keyboard_selection_is_bounded_and_tracks_the_active_column() {
     let mut state = NavigationState::default();
     state.navigate(location("/home"), RequestId(1));
-    state.apply_batch(RequestId(1), &[entry("/home/one"), entry("/home/two")]);
+    state.apply_batch(RequestId(1), vec![entry("/home/one"), entry("/home/two")]);
 
     assert_eq!(state.move_selection(1), Some((0, 0)));
     assert_eq!(state.move_selection(1), Some((0, 1)));
@@ -104,7 +109,7 @@ fn keyboard_selection_is_bounded_and_tracks_the_active_column() {
 fn moving_to_the_parent_column_restores_its_selection() {
     let mut state = NavigationState::default();
     state.navigate(location("/home"), RequestId(1));
-    state.apply_batch(RequestId(1), &[entry("/home/projects")]);
+    state.apply_batch(RequestId(1), vec![entry("/home/projects")]);
     assert!(state.select(0, 0));
     assert!(state.descend(0, location("/home/projects"), RequestId(2)));
 
@@ -118,11 +123,57 @@ fn moving_to_the_parent_column_restores_its_selection() {
 fn closing_the_deepest_column_preserves_the_parent_selection() {
     let mut state = NavigationState::default();
     state.navigate(location("/home"), RequestId(1));
-    state.apply_batch(RequestId(1), &[entry("/home/projects")]);
+    state.apply_batch(RequestId(1), vec![entry("/home/projects")]);
     assert!(state.select(0, 0));
     assert!(state.descend(0, location("/home/projects"), RequestId(2)));
 
     assert_eq!(state.close_deepest(), Some((0, Some(0))));
     assert_eq!(state.columns.len(), 1);
     assert_eq!(state.close_deepest(), None);
+}
+
+#[test]
+fn batches_are_merged_into_one_global_sort_order() {
+    let mut state = NavigationState::default();
+    state.navigate(location("/fixture"), RequestId(1));
+    state.apply_batch(RequestId(1), vec![named_entry("/fixture/z", "z")]);
+    assert!(state.select(0, 0));
+
+    let (_, insertions) = state
+        .apply_batch(RequestId(1), vec![named_entry("/fixture/a", "a")])
+        .expect("the request is current");
+
+    assert_eq!(insertions.len(), 1);
+    assert_eq!(insertions[0].position, 0);
+    assert_eq!(state.columns[0].entries[0].display_name, "a");
+    assert_eq!(state.columns[0].entries[1].display_name, "z");
+    assert_eq!(state.columns[0].selected, Some(1));
+}
+
+#[test]
+fn changing_sort_preferences_preserves_the_selected_entry() {
+    let mut state = NavigationState::default();
+    state.navigate(location("/fixture"), RequestId(1));
+    state.apply_batch(
+        RequestId(1),
+        vec![
+            named_entry("/fixture/a", "a"),
+            named_entry("/fixture/z", "z"),
+        ],
+    );
+    assert!(state.select(0, 0));
+
+    state.set_preferences(ViewPreferences {
+        sort_direction: SortDirection::Descending,
+        ..ViewPreferences::default()
+    });
+
+    assert_eq!(state.columns[0].entries[0].display_name, "z");
+    assert_eq!(state.columns[0].selected, Some(1));
+    assert_eq!(
+        state
+            .focused_entry()
+            .map(|(_, _, entry)| entry.display_name),
+        Some("a".into())
+    );
 }

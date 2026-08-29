@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+use std::cmp::Ordering;
+
 use crate::{
     app::peek::PeekState,
-    model::{FileEntry, Location},
+    model::{FileEntry, Location, MetadataValue, SortDirection, SortKey, ViewPreferences},
     services::RequestId,
 };
 
@@ -15,10 +17,17 @@ pub enum LoadState {
 }
 
 #[derive(Clone, Debug)]
+pub struct EntryInsertion {
+    pub position: usize,
+    pub entries: Vec<FileEntry>,
+}
+
+#[derive(Clone, Debug)]
 pub struct ColumnState {
     pub location: Location,
     pub entries: Vec<FileEntry>,
     pub selected: Option<usize>,
+    selection_target: Option<Location>,
     pub load_state: LoadState,
     request_id: RequestId,
 }
@@ -60,6 +69,7 @@ pub struct NavigationState {
     peek: Option<PeekState>,
     back_history: Vec<NavigationPath>,
     forward_history: Vec<NavigationPath>,
+    preferences: ViewPreferences,
 }
 
 impl NavigationState {
@@ -122,6 +132,7 @@ impl NavigationState {
                 location,
                 entries: Vec::new(),
                 selected: None,
+                selection_target: None,
                 load_state: LoadState::Loading,
                 request_id,
             })
@@ -129,7 +140,7 @@ impl NavigationState {
         self.active_column = self.columns.len().checked_sub(1);
     }
 
-    fn current_path(&self) -> Option<NavigationPath> {
+    pub fn current_path(&self) -> Option<NavigationPath> {
         (!self.columns.is_empty()).then(|| {
             NavigationPath::from_locations(
                 self.columns
@@ -152,15 +163,83 @@ impl NavigationState {
             location,
             entries: Vec::new(),
             selected: None,
+            selection_target: None,
             load_state: LoadState::Loading,
             request_id,
         });
     }
 
-    pub fn apply_batch(&mut self, request_id: RequestId, entries: &[FileEntry]) -> Option<usize> {
+    pub fn apply_batch(
+        &mut self,
+        request_id: RequestId,
+        entries: Vec<FileEntry>,
+    ) -> Option<(usize, Vec<EntryInsertion>)> {
+        let preferences = self.preferences;
         let (depth, column) = self.column_for_request_mut(request_id)?;
-        column.entries.extend_from_slice(entries);
-        Some(depth)
+        let selected_location = column
+            .selected
+            .and_then(|position| column.entries.get(position))
+            .map(|entry| entry.location.clone());
+        let (merged, insertions) =
+            merge_entries(std::mem::take(&mut column.entries), entries, preferences);
+        column.entries = merged;
+        if let Some(selected_location) =
+            selected_location.or_else(|| column.selection_target.clone())
+        {
+            column.selected = column
+                .entries
+                .iter()
+                .position(|entry| entry.location == selected_location);
+            if column.selected.is_some() {
+                column.selection_target = None;
+            }
+        }
+        Some((depth, insertions))
+    }
+
+    pub fn reload_column(&mut self, depth: usize, request_id: RequestId) -> Option<Location> {
+        let column = self.columns.get_mut(depth)?;
+        column.selection_target = column
+            .selected
+            .and_then(|position| column.entries.get(position))
+            .map(|entry| entry.location.clone());
+        column.entries.clear();
+        column.selected = None;
+        column.load_state = LoadState::Loading;
+        column.request_id = request_id;
+        Some(column.location.clone())
+    }
+
+    pub fn set_preferences(&mut self, preferences: ViewPreferences) {
+        self.preferences = preferences;
+        for column in &mut self.columns {
+            let selected_location = column
+                .selected
+                .and_then(|position| column.entries.get(position))
+                .map(|entry| entry.location.clone());
+            column
+                .entries
+                .sort_by(|left, right| compare_entries(left, right, preferences));
+            column.selected = selected_location.and_then(|location| {
+                column
+                    .entries
+                    .iter()
+                    .position(|entry| entry.location == location)
+            });
+        }
+    }
+
+    pub fn column_entries(&self) -> Vec<(usize, Vec<FileEntry>, Option<usize>)> {
+        self.columns
+            .iter()
+            .enumerate()
+            .map(|(depth, column)| (depth, column.entries.clone(), column.selected))
+            .collect()
+    }
+
+    pub fn active_focus(&self) -> Option<(usize, Option<usize>)> {
+        let depth = self.active_column?;
+        Some((depth, self.columns.get(depth)?.selected))
     }
 
     pub fn finish(&mut self, request_id: RequestId) -> Option<usize> {
@@ -299,6 +378,95 @@ impl NavigationState {
             .iter_mut()
             .enumerate()
             .find(|(_, column)| column.request_id == request_id)
+    }
+}
+
+fn merge_entries(
+    mut existing: Vec<FileEntry>,
+    mut incoming: Vec<FileEntry>,
+    preferences: ViewPreferences,
+) -> (Vec<FileEntry>, Vec<EntryInsertion>) {
+    incoming.sort_by(|left, right| compare_entries(left, right, preferences));
+    if existing.is_empty() {
+        let insertion = EntryInsertion {
+            position: 0,
+            entries: incoming.clone(),
+        };
+        return (incoming, vec![insertion]);
+    }
+
+    let mut merged = Vec::with_capacity(existing.len() + incoming.len());
+    let mut existing = existing.drain(..).peekable();
+    let mut incoming = incoming.into_iter().peekable();
+    let mut insertions = Vec::<EntryInsertion>::new();
+
+    while existing.peek().is_some() || incoming.peek().is_some() {
+        let take_incoming = match (existing.peek(), incoming.peek()) {
+            (Some(left), Some(right)) => {
+                compare_entries(right, left, preferences) != Ordering::Greater
+            }
+            (None, Some(_)) => true,
+            _ => false,
+        };
+
+        if take_incoming {
+            let Some(entry) = incoming.next() else {
+                break;
+            };
+            let position = merged.len();
+            if let Some(insertion) = insertions
+                .last_mut()
+                .filter(|insertion| insertion.position + insertion.entries.len() == position)
+            {
+                insertion.entries.push(entry.clone());
+            } else {
+                insertions.push(EntryInsertion {
+                    position,
+                    entries: vec![entry.clone()],
+                });
+            }
+            merged.push(entry);
+        } else if let Some(entry) = existing.next() {
+            merged.push(entry);
+        }
+    }
+
+    (merged, insertions)
+}
+
+fn compare_entries(left: &FileEntry, right: &FileEntry, preferences: ViewPreferences) -> Ordering {
+    if preferences.folders_first {
+        let directory_order = right.is_directory().cmp(&left.is_directory());
+        if directory_order != Ordering::Equal {
+            return directory_order;
+        }
+    }
+
+    let ordering = match preferences.sort_key {
+        SortKey::Name => left.display_name.cmp(&right.display_name),
+        SortKey::Type => left.kind.cmp(&right.kind),
+        SortKey::Size => compare_metadata(&left.size, &right.size),
+        SortKey::Modified => {
+            compare_metadata(&left.modified_unix_seconds, &right.modified_unix_seconds)
+        }
+    };
+    let ordering = match preferences.sort_direction {
+        SortDirection::Ascending => ordering,
+        SortDirection::Descending => ordering.reverse(),
+    };
+    ordering
+        .then_with(|| left.display_name.cmp(&right.display_name))
+        .then_with(|| left.location.path().cmp(right.location.path()))
+}
+
+fn compare_metadata<T: Ord>(left: &MetadataValue<T>, right: &MetadataValue<T>) -> Ordering {
+    match (left, right) {
+        (MetadataValue::Known(left), MetadataValue::Known(right)) => left.cmp(right),
+        (MetadataValue::Known(_), _) => Ordering::Less,
+        (_, MetadataValue::Known(_)) => Ordering::Greater,
+        (MetadataValue::Unknown, MetadataValue::Unavailable) => Ordering::Less,
+        (MetadataValue::Unavailable, MetadataValue::Unknown) => Ordering::Greater,
+        _ => Ordering::Equal,
     }
 }
 

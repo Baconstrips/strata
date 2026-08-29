@@ -12,6 +12,7 @@ pub struct DirectoryRequest {
     pub id: RequestId,
     pub location: Location,
     pub batch_size: usize,
+    pub include_hidden: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -52,4 +53,8 @@ impl Drop for LoadHandle {
 
 pub trait FileSource {
     fn enumerate(&self, request: DirectoryRequest, emit: Rc<dyn Fn(DirectoryEvent)>) -> LoadHandle;
+
+    fn watch(&self, _location: Location, _notify: Rc<dyn Fn()>) -> Option<LoadHandle> {
+        None
+    }
 }

@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use std::{rc::Rc, time::Instant};
+use std::{
+    cell::RefCell,
+    rc::Rc,
+    time::{Duration, Instant},
+};
 
 use gtk::{gio, glib, prelude::*};
 
@@ -58,9 +62,9 @@ impl FileSource for LocalFileSource {
                         break;
                     }
                     Ok(files) => {
-                        let mut entries: Vec<_> = files
+                        let entries: Vec<_> = files
                             .into_iter()
-                            .filter(|info| !info.is_hidden())
+                            .filter(|info| request.include_hidden || !info.is_hidden())
                             .map(|info| {
                                 let native_path = info.name();
                                 let native_name = native_path.into_os_string();
@@ -75,16 +79,20 @@ impl FileSource for LocalFileSource {
                                     native_name,
                                     display_name: info.display_name().to_string(),
                                     kind,
-                                    size: u64::try_from(info.size())
-                                        .map(MetadataValue::Known)
+                                    size: if kind == EntryKind::Directory {
+                                        MetadataValue::Unknown
+                                    } else {
+                                        u64::try_from(info.size())
+                                            .map(MetadataValue::Known)
+                                            .unwrap_or(MetadataValue::Unavailable)
+                                    },
+                                    modified_unix_seconds: info
+                                        .modification_date_time()
+                                        .map(|modified| MetadataValue::Known(modified.to_unix()))
                                         .unwrap_or(MetadataValue::Unavailable),
-                                    modified_unix_seconds: MetadataValue::Unknown,
                                 }
                             })
                             .collect();
-                        entries.sort_unstable_by_key(|entry| {
-                            (!entry.is_directory(), entry.display_name.to_lowercase())
-                        });
                         total_entries += entries.len();
                         if first_batch {
                             tracing::info!(
@@ -116,5 +124,43 @@ impl FileSource for LocalFileSource {
             tracing::debug!(request_id = request_id.0, "directory load cancelled");
             task.abort();
         })
+    }
+
+    fn watch(&self, location: crate::model::Location, notify: Rc<dyn Fn()>) -> Option<LoadHandle> {
+        let file = gio::File::for_path(location.path());
+        let monitor = match file.monitor_directory(
+            gio::FileMonitorFlags::WATCH_MOVES,
+            None::<&gio::Cancellable>,
+        ) {
+            Ok(monitor) => monitor,
+            Err(error) => {
+                tracing::warn!(
+                    path = %location.path().display(),
+                    error = %error,
+                    "directory monitoring unavailable"
+                );
+                return None;
+            }
+        };
+        let pending = Rc::new(RefCell::new(None::<glib::SourceId>));
+        let pending_for_change = pending.clone();
+        monitor.connect_changed(move |_, _, _, _| {
+            if let Some(source) = pending_for_change.take() {
+                source.remove();
+            }
+            let pending_for_timeout = pending_for_change.clone();
+            let notify = notify.clone();
+            let source = glib::timeout_add_local_once(Duration::from_millis(100), move || {
+                pending_for_timeout.take();
+                notify();
+            });
+            pending_for_change.replace(Some(source));
+        });
+        Some(LoadHandle::new(move || {
+            if let Some(source) = pending.take() {
+                source.remove();
+            }
+            let _cancelled = monitor.cancel();
+        }))
     }
 }

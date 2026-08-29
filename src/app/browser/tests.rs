@@ -14,6 +14,54 @@ struct TrackingFileSource {
     cancellations: Rc<Cell<usize>>,
 }
 
+struct RecordingFileSource {
+    include_hidden: Rc<RefCell<Vec<bool>>>,
+}
+
+type WatchCallback = Rc<dyn Fn()>;
+
+struct WatchingFileSource {
+    notify: Rc<RefCell<Option<WatchCallback>>>,
+}
+
+impl FileSource for WatchingFileSource {
+    fn enumerate(&self, request: DirectoryRequest, emit: Rc<dyn Fn(DirectoryEvent)>) -> LoadHandle {
+        emit(DirectoryEvent::Batch {
+            request_id: request.id,
+            entries: vec![FileEntry {
+                location: Location::local("/fixture/child"),
+                native_name: OsString::from("child"),
+                display_name: "child".into(),
+                kind: EntryKind::Directory,
+                size: MetadataValue::Unknown,
+                modified_unix_seconds: MetadataValue::Unknown,
+            }],
+        });
+        emit(DirectoryEvent::Finished {
+            request_id: request.id,
+        });
+        LoadHandle::new(|| {})
+    }
+
+    fn watch(&self, _location: Location, notify: Rc<dyn Fn()>) -> Option<LoadHandle> {
+        self.notify.replace(Some(notify));
+        Some(LoadHandle::new(|| {}))
+    }
+}
+
+impl FileSource for RecordingFileSource {
+    fn enumerate(
+        &self,
+        request: DirectoryRequest,
+        _emit: Rc<dyn Fn(DirectoryEvent)>,
+    ) -> LoadHandle {
+        self.include_hidden
+            .borrow_mut()
+            .push(request.include_hidden);
+        LoadHandle::new(|| {})
+    }
+}
+
 impl FileSource for TrackingFileSource {
     fn enumerate(
         &self,
@@ -46,6 +94,51 @@ impl FileSource for FakeFileSource {
 }
 
 #[test]
+fn filesystem_notifications_reload_the_affected_column() {
+    let notify = Rc::new(RefCell::new(None::<WatchCallback>));
+    let browser = Browser::new(Rc::new(WatchingFileSource {
+        notify: notify.clone(),
+    }));
+    let events = Rc::new(RefCell::new(Vec::new()));
+    let observed = events.clone();
+    browser.observe(move |event| observed.borrow_mut().push(event));
+    browser.navigate(Location::local("/fixture"));
+    events.borrow_mut().clear();
+
+    let callback = notify
+        .borrow()
+        .clone()
+        .expect("the directory watcher should be installed");
+    callback();
+
+    assert!(
+        events
+            .borrow()
+            .iter()
+            .any(|event| matches!(event, BrowserEvent::ColumnReloaded { depth: 0 }))
+    );
+    assert!(
+        events
+            .borrow()
+            .iter()
+            .any(|event| matches!(event, BrowserEvent::EntriesInserted { depth: 0, .. }))
+    );
+}
+
+#[test]
+fn hidden_file_preference_is_applied_to_reloaded_requests() {
+    let include_hidden = Rc::new(RefCell::new(Vec::new()));
+    let browser = Browser::new(Rc::new(RecordingFileSource {
+        include_hidden: include_hidden.clone(),
+    }));
+
+    browser.navigate(Location::local("/fixture"));
+    browser.toggle_hidden();
+
+    assert_eq!(*include_hidden.borrow(), vec![false, true]);
+}
+
+#[test]
 fn navigating_away_cancels_the_previous_directory_request() {
     let cancellations = Rc::new(Cell::new(0));
     let browser = Browser::new(Rc::new(TrackingFileSource {
@@ -69,7 +162,8 @@ fn file_source_can_be_replaced_without_constructing_the_ui() {
 
     assert!(events.borrow().iter().any(|event| matches!(
         event,
-        BrowserEvent::EntriesAdded { entries, .. } if entries.len() == 1
+        BrowserEvent::EntriesInserted { insertions, .. }
+            if insertions.iter().map(|insertion| insertion.entries.len()).sum::<usize>() == 1
     )));
     assert!(
         events

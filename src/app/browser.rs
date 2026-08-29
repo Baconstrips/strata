@@ -6,8 +6,8 @@ use std::{
 };
 
 use crate::{
-    app::navigation::{NavigationPath, NavigationState},
-    model::{FileEntry, Location},
+    app::navigation::{EntryInsertion, NavigationPath, NavigationState},
+    model::{FileEntry, Location, SortDirection, SortKey, ViewPreferences},
     services::{DirectoryEvent, DirectoryRequest, FileSource, LoadHandle, RequestId},
 };
 
@@ -21,9 +21,16 @@ pub enum BrowserEvent {
         depth: usize,
         location: Location,
     },
-    EntriesAdded {
+    EntriesInserted {
+        depth: usize,
+        insertions: Vec<EntryInsertion>,
+    },
+    EntriesReplaced {
         depth: usize,
         entries: Vec<FileEntry>,
+    },
+    ColumnReloaded {
+        depth: usize,
     },
     LoadFinished {
         depth: usize,
@@ -47,6 +54,10 @@ pub enum BrowserEvent {
         depth: usize,
         position: Option<usize>,
     },
+    SelectionChanged {
+        depth: usize,
+        position: usize,
+    },
     OpenRequested {
         location: Location,
     },
@@ -58,8 +69,10 @@ pub struct Browser {
     source: Rc<dyn FileSource>,
     state: RefCell<NavigationState>,
     loads: RefCell<Vec<LoadHandle>>,
+    monitors: RefCell<Vec<Option<LoadHandle>>>,
     peek_load: RefCell<Option<LoadHandle>>,
     next_request: Cell<u64>,
+    preferences: Cell<ViewPreferences>,
     observer: RefCell<Option<Observer>>,
 }
 
@@ -69,8 +82,10 @@ impl Browser {
             source,
             state: RefCell::new(NavigationState::default()),
             loads: RefCell::new(Vec::new()),
+            monitors: RefCell::new(Vec::new()),
             peek_load: RefCell::new(None),
             next_request: Cell::new(1),
+            preferences: Cell::new(ViewPreferences::default()),
             observer: RefCell::new(None),
         })
     }
@@ -86,6 +101,7 @@ impl Browser {
     pub fn navigate(self: &Rc<Self>, location: Location) {
         self.close_peek();
         self.loads.borrow_mut().clear();
+        self.monitors.borrow_mut().clear();
         let request_id = self.new_request_id();
         self.state
             .borrow_mut()
@@ -99,7 +115,7 @@ impl Browser {
             depth: 0,
             position: None,
         });
-        self.start_load(location, request_id);
+        self.start_load(0, location, request_id);
     }
 
     pub fn descend(self: &Rc<Self>, parent_depth: usize, location: Location) {
@@ -115,6 +131,7 @@ impl Browser {
 
         let retained = parent_depth + 1;
         self.loads.borrow_mut().truncate(retained);
+        self.monitors.borrow_mut().truncate(retained);
         self.emit(BrowserEvent::ColumnsTruncated { len: retained });
         self.emit(BrowserEvent::ColumnAdded {
             depth: retained,
@@ -124,7 +141,7 @@ impl Browser {
             depth: retained,
             position: None,
         });
-        self.start_load(location, request_id);
+        self.start_load(retained, location, request_id);
     }
 
     pub fn begin_peek(self: &Rc<Self>, origin_depth: usize, location: Location) {
@@ -152,6 +169,7 @@ impl Browser {
                 id: request_id,
                 location,
                 batch_size: 128,
+                include_hidden: self.preferences.get().show_hidden,
             },
             emit,
         );
@@ -176,6 +194,7 @@ impl Browser {
         if let Some((depth, position)) = closed {
             let len = depth + 1;
             self.loads.borrow_mut().truncate(len);
+            self.monitors.borrow_mut().truncate(len);
             self.emit(BrowserEvent::ColumnsTruncated { len });
             self.emit(BrowserEvent::FocusChanged { depth, position });
         }
@@ -186,6 +205,60 @@ impl Browser {
         if let Some((origin_depth, location)) = target {
             self.close_peek();
             self.descend(origin_depth, location);
+        }
+    }
+
+    pub fn set_sort_key(&self, sort_key: SortKey) {
+        let mut preferences = self.preferences.get();
+        preferences.sort_key = sort_key;
+        self.apply_preferences(preferences);
+    }
+
+    pub fn toggle_sort_direction(&self) {
+        let mut preferences = self.preferences.get();
+        preferences.sort_direction = match preferences.sort_direction {
+            SortDirection::Ascending => SortDirection::Descending,
+            SortDirection::Descending => SortDirection::Ascending,
+        };
+        self.apply_preferences(preferences);
+    }
+
+    pub fn set_folders_first(&self, folders_first: bool) {
+        let mut preferences = self.preferences.get();
+        preferences.folders_first = folders_first;
+        self.apply_preferences(preferences);
+    }
+
+    pub fn toggle_hidden(self: &Rc<Self>) {
+        let mut preferences = self.preferences.get();
+        preferences.show_hidden = !preferences.show_hidden;
+        self.preferences.set(preferences);
+
+        let column_count = {
+            let mut state = self.state.borrow_mut();
+            state.set_preferences(preferences);
+            state.columns.len()
+        };
+        for depth in 0..column_count {
+            self.refresh_column(depth);
+        }
+    }
+
+    fn apply_preferences(&self, preferences: ViewPreferences) {
+        self.preferences.set(preferences);
+        let (columns, focus) = {
+            let mut state = self.state.borrow_mut();
+            state.set_preferences(preferences);
+            (state.column_entries(), state.active_focus())
+        };
+        for (depth, entries, selected) in columns {
+            self.emit(BrowserEvent::EntriesReplaced { depth, entries });
+            if let Some(position) = selected {
+                self.emit(BrowserEvent::SelectionChanged { depth, position });
+            }
+        }
+        if let Some((depth, position)) = focus {
+            self.emit(BrowserEvent::FocusChanged { depth, position });
         }
     }
 
@@ -262,6 +335,7 @@ impl Browser {
     fn restore_path(self: &Rc<Self>, path: NavigationPath) {
         self.close_peek();
         self.loads.borrow_mut().clear();
+        self.monitors.borrow_mut().clear();
         let loads: Vec<_> = path
             .locations()
             .iter()
@@ -282,7 +356,7 @@ impl Browser {
                 depth,
                 location: location.clone(),
             });
-            self.start_load(location, request_id);
+            self.start_load(depth, location, request_id);
         }
         if let Some(depth) = active_depth {
             self.emit(BrowserEvent::FocusChanged {
@@ -292,22 +366,50 @@ impl Browser {
         }
     }
 
-    fn start_load(self: &Rc<Self>, location: Location, request_id: RequestId) {
+    fn start_load(self: &Rc<Self>, depth: usize, location: Location, request_id: RequestId) {
+        let handle = self.request_directory(location.clone(), request_id);
+        self.loads.borrow_mut().push(handle);
+
+        let weak: Weak<Self> = Rc::downgrade(self);
+        let notify = Rc::new(move || {
+            if let Some(browser) = weak.upgrade() {
+                browser.refresh_column(depth);
+            }
+        });
+        self.monitors
+            .borrow_mut()
+            .push(self.source.watch(location, notify));
+    }
+
+    fn request_directory(self: &Rc<Self>, location: Location, request_id: RequestId) -> LoadHandle {
         let weak: Weak<Self> = Rc::downgrade(self);
         let emit = Rc::new(move |event| {
             if let Some(browser) = weak.upgrade() {
                 browser.handle_directory_event(event);
             }
         });
-        let handle = self.source.enumerate(
+        self.source.enumerate(
             DirectoryRequest {
                 id: request_id,
                 location,
                 batch_size: 128,
+                include_hidden: self.preferences.get().show_hidden,
             },
             emit,
-        );
-        self.loads.borrow_mut().push(handle);
+        )
+    }
+
+    fn refresh_column(self: &Rc<Self>, depth: usize) {
+        let request_id = self.new_request_id();
+        let location = self.state.borrow_mut().reload_column(depth, request_id);
+        let Some(location) = location else {
+            return;
+        };
+        self.emit(BrowserEvent::ColumnReloaded { depth });
+        let handle = self.request_directory(location, request_id);
+        if let Some(load) = self.loads.borrow_mut().get_mut(depth) {
+            *load = handle;
+        }
     }
 
     fn handle_directory_event(&self, event: DirectoryEvent) {
@@ -317,16 +419,20 @@ impl Browser {
                 entries,
             } => {
                 let mut state = self.state.borrow_mut();
-                let depth = state.apply_batch(request_id, &entries);
-                if let Some(depth) = depth {
+                let application = state.apply_batch(request_id, entries.clone());
+                if let Some((depth, insertions)) = application {
                     tracing::debug!(
                         request_id = request_id.0,
                         location = %state.columns[depth].location.path().display(),
                         entries = entries.len(),
                         "directory batch accepted"
                     );
+                    let selected = state.columns[depth].selected;
                     drop(state);
-                    self.emit(BrowserEvent::EntriesAdded { depth, entries });
+                    self.emit(BrowserEvent::EntriesInserted { depth, insertions });
+                    if let Some(position) = selected {
+                        self.emit(BrowserEvent::SelectionChanged { depth, position });
+                    }
                 } else if state.apply_peek_batch(request_id, &entries) {
                     drop(state);
                     self.emit(BrowserEvent::PeekEntriesAdded { entries });

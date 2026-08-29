@@ -97,13 +97,13 @@ Legend: **P0** blocks the milestone, **P1** is required for its exit criteria, *
 
 ### Directory behavior
 
-- [ ] **P0** Hidden-file toggle
-- [ ] **P0** Stable sorting by name, type, size, and modified time
+- [x] **P0** Hidden-file toggle
+- [x] **P0** Stable sorting by name, type, size, and modified time
 - [ ] **P0** Directory monitoring with incremental updates
-- [ ] **P0** Preserve UI responsiveness in 100k-entry fixture
+- [x] **P0** Preserve UI responsiveness in 100k-entry fixture
 - [ ] **P1** Handle invalid UTF-8 display names without losing native paths
 - [ ] **P1** Handle broken symlinks and files disappearing during navigation
-- [ ] **P1** Add configurable folders-first sorting
+- [x] **P1** Add configurable folders-first sorting
 
 ### Sidebar
 

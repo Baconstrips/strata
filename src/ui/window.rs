@@ -4,7 +4,11 @@ use std::{env, path::PathBuf, rc::Rc};
 
 use gtk::{glib, prelude::*};
 
-use crate::{adapters::LocalFileSource, app::Browser, model::Location};
+use crate::{
+    adapters::LocalFileSource,
+    app::Browser,
+    model::{Location, SortKey},
+};
 
 use super::browser::{BrowserView, PeekBehavior};
 
@@ -34,6 +38,44 @@ pub fn present_location(application: &gtk::Application, location: Option<PathBuf
         .tooltip_text("Search")
         .build();
     header.pack_end(&search_button);
+
+    let sort = gtk::DropDown::from_strings(&["Name", "Type", "Size", "Modified"]);
+    sort.set_tooltip_text(Some("Sort directory"));
+    let weak_controller = Rc::downgrade(&controller);
+    sort.connect_selected_notify(move |sort| {
+        let sort_key = match sort.selected() {
+            1 => SortKey::Type,
+            2 => SortKey::Size,
+            3 => SortKey::Modified,
+            _ => SortKey::Name,
+        };
+        if let Some(controller) = weak_controller.upgrade() {
+            controller.set_sort_key(sort_key);
+        }
+    });
+    header.pack_end(&sort);
+
+    let direction = navigation_button("view-sort-ascending-symbolic", "Reverse sort direction");
+    let weak_controller = Rc::downgrade(&controller);
+    direction.connect_clicked(move |_| {
+        if let Some(controller) = weak_controller.upgrade() {
+            controller.toggle_sort_direction();
+        }
+    });
+    header.pack_end(&direction);
+
+    let folders_first = gtk::ToggleButton::builder()
+        .label("Folders first")
+        .active(true)
+        .tooltip_text("Keep folders before files")
+        .build();
+    let weak_controller = Rc::downgrade(&controller);
+    folders_first.connect_toggled(move |button| {
+        if let Some(controller) = weak_controller.upgrade() {
+            controller.set_folders_first(button.is_active());
+        }
+    });
+    header.pack_end(&folders_first);
 
     let back = navigation_button("go-previous-symbolic", "Back");
     let weak_controller = Rc::downgrade(&controller);
@@ -102,6 +144,11 @@ fn install_keyboard_navigation(window: &gtk::ApplicationWindow, browser: &Rc<Bro
             return glib::Propagation::Proceed;
         };
         let alt = modifiers.contains(gtk::gdk::ModifierType::ALT_MASK);
+        let control = modifiers.contains(gtk::gdk::ModifierType::CONTROL_MASK);
+        if control && key == gtk::gdk::Key::h {
+            browser.toggle_hidden();
+            return glib::Propagation::Stop;
+        }
 
         match (key, alt) {
             (gtk::gdk::Key::Left, true) => browser.back(),
