@@ -173,6 +173,8 @@ A later operation-history milestone should add Undo and Redo where outcomes can 
 - Directional navigation maps naturally to Miller columns.
 - Search, location entry, preview, sidebar, view mode, hidden files, rename, copy, move, paste, trash, and cancel have defaults.
 - Keybindings become user-configurable without editing source code.
+- Required defaults include `F2` for rename, `Delete` for a confirmed delete/trash action, and `Ctrl+Shift+N` for a new directory.
+- When operation history is implemented, Undo uses `Ctrl+Z`; Redo supports both `Ctrl+Shift+Z` and `Ctrl+Y`.
 - The application exposes a discoverable shortcut reference.
 
 ### 7.9 Themes and typography

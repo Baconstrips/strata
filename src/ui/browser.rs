@@ -15,8 +15,16 @@ use crate::{
     services::FileSource,
 };
 
+use super::motion::{animations_enabled, emphasized_deceleration};
+
+const COLUMN_WIDTH: i32 = 300;
+const COLUMN_OFFSET: i32 = 24;
+const COLUMN_TRANSITION: Duration = Duration::from_millis(220);
+
 #[derive(Clone)]
 struct ColumnView {
+    shell: gtk::Box,
+    animation_generation: Rc<Cell<u64>>,
     model: gtk::StringList,
     selection: gtk::SingleSelection,
     list: gtk::ListView,
@@ -60,6 +68,7 @@ struct ViewState {
     columns_widget: gtk::Box,
     scroller: gtk::ScrolledWindow,
     columns: RefCell<Vec<ColumnView>>,
+    horizontal_scroll_generation: Rc<Cell<u64>>,
     peek: RefCell<Option<PeekView>>,
     pending_peek: RefCell<Option<glib::SourceId>>,
     pending_close: RefCell<Option<glib::SourceId>>,
@@ -135,6 +144,7 @@ impl BrowserView {
             columns_widget,
             scroller,
             columns: RefCell::new(Vec::new()),
+            horizontal_scroll_generation: Rc::new(Cell::new(0)),
             peek: RefCell::new(None),
             pending_peek: RefCell::new(None),
             pending_close: RefCell::new(None),
@@ -407,7 +417,7 @@ impl ViewState {
     fn append_column(self: &Rc<Self>, depth: usize, location: &Location) {
         let column = gtk::Box::new(gtk::Orientation::Vertical, 0);
         column.add_css_class("directory-column");
-        column.set_size_request(300, -1);
+        column.set_hexpand(true);
         column.set_vexpand(true);
 
         let header = gtk::Box::new(gtk::Orientation::Horizontal, 8);
@@ -497,14 +507,21 @@ impl ViewState {
             .build();
         column.append(&scroll);
 
-        let revealer = gtk::Revealer::builder()
-            .child(&column)
-            .transition_type(gtk::RevealerTransitionType::SlideRight)
-            .transition_duration(180)
-            .reveal_child(false)
-            .build();
-        self.columns_widget.append(&revealer);
+        let shell = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        shell.set_size_request(COLUMN_WIDTH, -1);
+        shell.set_vexpand(true);
+        shell.set_overflow(gtk::Overflow::Hidden);
+        shell.append(&column);
+        let animation_generation = Rc::new(Cell::new(0));
+        let previous = depth
+            .checked_sub(1)
+            .and_then(|previous| self.columns.borrow().get(previous).cloned())
+            .map(|column| column.shell);
+        self.columns_widget
+            .insert_child_after(&shell, previous.as_ref());
         self.columns.borrow_mut().push(ColumnView {
+            shell: shell.clone(),
+            animation_generation: animation_generation.clone(),
             model,
             selection,
             list,
@@ -512,16 +529,47 @@ impl ViewState {
             spinner,
         });
 
-        let adjustment = self.scroller.hadjustment();
-        let completed_adjustment = adjustment.clone();
-        revealer.connect_child_revealed_notify(move |revealer| {
-            if revealer.is_child_revealed() {
-                scroll_to_end(&completed_adjustment);
+        animate_column_entry(&shell, &column, &animation_generation);
+        self.reveal_column(shell);
+    }
+
+    fn reveal_column(self: &Rc<Self>, shell: gtk::Box) {
+        let animation_id = self.horizontal_scroll_generation.get().saturating_add(1);
+        self.horizontal_scroll_generation.set(animation_id);
+        let weak = Rc::downgrade(self);
+        let measured_shell = shell;
+        let _tick = self.scroller.add_tick_callback(move |_, _| {
+            let Some(state) = weak.upgrade() else {
+                return glib::ControlFlow::Break;
+            };
+            if state.horizontal_scroll_generation.get() != animation_id
+                || measured_shell.parent().is_none()
+            {
+                return glib::ControlFlow::Break;
             }
-        });
-        glib::idle_add_local_once(move || {
-            revealer.set_reveal_child(true);
-            scroll_to_end(&adjustment);
+            let adjustment = state.scroller.hadjustment();
+            if measured_shell.width() <= 0 || adjustment.page_size() <= 0.0 {
+                return glib::ControlFlow::Continue;
+            }
+            let Some(bounds) = measured_shell.compute_bounds(&state.columns_widget) else {
+                return glib::ControlFlow::Continue;
+            };
+            let target = horizontal_reveal_target(
+                adjustment.value(),
+                adjustment.page_size(),
+                adjustment.lower(),
+                adjustment.upper(),
+                f64::from(bounds.x()),
+                f64::from(bounds.x() + bounds.width()),
+            );
+            animate_horizontal_scroll(
+                &state.scroller,
+                &adjustment,
+                target,
+                &state.horizontal_scroll_generation,
+                animation_id,
+            );
+            glib::ControlFlow::Break
         });
     }
 
@@ -686,13 +734,26 @@ impl ViewState {
         }
     }
 
-    fn truncate(&self, len: usize) {
+    fn truncate(self: &Rc<Self>, len: usize) {
         self.close_peek_visual();
+        self.horizontal_scroll_generation
+            .set(self.horizontal_scroll_generation.get().saturating_add(1));
         while self.columns.borrow().len() > len {
-            self.columns.borrow_mut().pop();
-            if let Some(child) = self.columns_widget.last_child() {
-                self.columns_widget.remove(&child);
-            }
+            let Some(column) = self.columns.borrow_mut().pop() else {
+                break;
+            };
+            column
+                .animation_generation
+                .set(column.animation_generation.get().saturating_add(1));
+            self.columns_widget.remove(&column.shell);
+        }
+        let retained = self
+            .columns
+            .borrow()
+            .last()
+            .map(|column| column.shell.clone());
+        if let Some(retained) = retained {
+            self.reveal_column(retained);
         }
     }
 }
@@ -749,9 +810,90 @@ fn cancel_source(source: &RefCell<Option<glib::SourceId>>) {
     }
 }
 
-fn scroll_to_end(adjustment: &gtk::Adjustment) {
-    let end = (adjustment.upper() - adjustment.page_size()).max(adjustment.lower());
-    adjustment.set_value(end);
+fn animate_column_entry(shell: &gtk::Box, column: &gtk::Box, generation: &Rc<Cell<u64>>) {
+    let animation_id = generation.get().saturating_add(1);
+    generation.set(animation_id);
+    if !animations_enabled() {
+        column.set_opacity(1.0);
+        column.set_margin_start(0);
+        return;
+    }
+
+    column.set_opacity(0.0);
+    column.set_margin_start(COLUMN_OFFSET);
+    let started = Instant::now();
+    let shell = shell.clone();
+    let column = column.clone();
+    let generation = generation.clone();
+    let _tick = shell.add_tick_callback(move |_, _| {
+        if generation.get() != animation_id {
+            return glib::ControlFlow::Break;
+        }
+        let progress =
+            (started.elapsed().as_secs_f64() / COLUMN_TRANSITION.as_secs_f64()).clamp(0.0, 1.0);
+        let eased = emphasized_deceleration(progress);
+        column.set_opacity(eased);
+        column.set_margin_start((f64::from(COLUMN_OFFSET) * (1.0 - eased)).round() as i32);
+        if progress >= 1.0 {
+            column.set_opacity(1.0);
+            column.set_margin_start(0);
+            glib::ControlFlow::Break
+        } else {
+            glib::ControlFlow::Continue
+        }
+    });
+}
+
+fn horizontal_reveal_target(
+    current: f64,
+    page_size: f64,
+    lower: f64,
+    upper: f64,
+    item_left: f64,
+    item_right: f64,
+) -> f64 {
+    let viewport_right = current + page_size;
+    let target = if item_right > viewport_right {
+        item_right - page_size
+    } else if item_left < current {
+        item_left
+    } else {
+        current
+    };
+    target.clamp(lower, (upper - page_size).max(lower))
+}
+
+fn animate_horizontal_scroll(
+    scroller: &gtk::ScrolledWindow,
+    adjustment: &gtk::Adjustment,
+    target: f64,
+    generation: &Rc<Cell<u64>>,
+    animation_id: u64,
+) {
+    let start = adjustment.value();
+    if !animations_enabled() || (target - start).abs() < 0.5 {
+        adjustment.set_value(target);
+        return;
+    }
+
+    let started = Instant::now();
+    let adjustment = adjustment.clone();
+    let generation = generation.clone();
+    let _tick = scroller.add_tick_callback(move |_, _| {
+        if generation.get() != animation_id {
+            return glib::ControlFlow::Break;
+        }
+        let progress =
+            (started.elapsed().as_secs_f64() / COLUMN_TRANSITION.as_secs_f64()).clamp(0.0, 1.0);
+        let eased = emphasized_deceleration(progress);
+        adjustment.set_value(start + (target - start) * eased);
+        if progress >= 1.0 {
+            adjustment.set_value(target);
+            glib::ControlFlow::Break
+        } else {
+            glib::ControlFlow::Continue
+        }
+    });
 }
 
 fn open_file(path: &Path) {
@@ -760,3 +902,6 @@ fn open_file(path: &Path) {
         tracing::warn!(path = %path.display(), error = %error, "unable to open file");
     }
 }
+
+#[cfg(test)]
+mod tests;

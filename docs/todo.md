@@ -63,7 +63,7 @@ Legend: **P0** blocks the milestone, **P1** is required for its exit criteria, *
 - [x] **P0** Allow committed columns to stack without a fixed depth limit
 - [x] **P0** Keep the newest active column visible by scrolling to the end during horizontal overflow
 - [x] **P0** Preserve selection per committed column
-- [ ] **P1** Make entry/exit animations interruptible
+- [x] **P1** Make column entry animations interruptible and remove closed columns immediately
 - [ ] **P1** Add loading skeleton and directory error state
 - [x] **P1** Cancel enumeration when a column is removed
 
@@ -121,14 +121,15 @@ Legend: **P0** blocks the milestone, **P1** is required for its exit criteria, *
 ### Opening and creation
 
 - [ ] **P0** Open and Open With
-- [ ] **P0** Create folder and empty file
-- [ ] **P0** Rename with validation and inline feedback
+- [ ] **P0** Create folder (`Ctrl+Shift+N`) and empty file
+- [ ] **P0** Rename with validation and inline feedback (`F2`)
 - [ ] **P1** Executable-file policy and confirmation
 
 ### Operation engine
 
 - [ ] **P0** Model queued operation lifecycle and final outcomes
 - [ ] **P0** Copy, move, duplicate, trash, and permanent delete
+- [ ] **P0** Bind `Delete` to a confirmed delete/trash action
 - [ ] **P0** Progress reporting and cancellation
 - [ ] **P0** Conflict handling: skip, replace, rename, and apply-to-all
 - [ ] **P0** Partial-failure reporting and safe cancellation cleanup
@@ -136,6 +137,7 @@ Legend: **P0** blocks the milestone, **P1** is required for its exit criteria, *
 - [ ] **P1** Disk-full, permissions, disappearing source, and read-only tests
 - [ ] **P2** Limited undo where behavior can be guaranteed
 - [ ] **P2** Future Undo/Redo operation history with toolbar buttons and configurable keyboard shortcuts
+- [ ] **P2** Bind Undo to `Ctrl+Z` and Redo to both `Ctrl+Shift+Z` and `Ctrl+Y`
 
 ### Desktop interoperability
 
