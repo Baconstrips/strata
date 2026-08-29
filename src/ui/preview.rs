@@ -23,6 +23,9 @@ const MIN_WIDTH: i32 = 280;
 const MAX_WIDTH: i32 = 720;
 const TEXT_BYTE_LIMIT: usize = 1024 * 1024;
 const TRANSITION: Duration = Duration::from_millis(260);
+const PDF_PAGE_GAP: i32 = 6;
+const PDF_MIN_ZOOM: f64 = 1.0;
+const PDF_MAX_ZOOM: f64 = 4.0;
 
 struct PreviewState {
     provider: Rc<dyn PreviewProvider>,
@@ -402,6 +405,11 @@ impl PreviewState {
         let model = gtk::StringList::new(&labels);
         let selection = gtk::NoSelection::new(Some(model));
         let factory = gtk::SignalListItemFactory::new();
+        let zoom = Rc::new(Cell::new(PDF_MIN_ZOOM));
+        let page_width = Rc::new(Cell::new(0));
+        let visible_pages = Rc::new(RefCell::new(
+            HashMap::<i32, (gtk::Overlay, gtk::Picture)>::new(),
+        ));
 
         factory.connect_setup(|_, item| {
             let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
@@ -428,6 +436,8 @@ impl PreviewState {
         let initial_page = Rc::new(RefCell::new(Some((initial_page, initial_png))));
         let next_request = Rc::new(Cell::new(self.next_request.get().saturating_add(10_000)));
         let entry_for_bind = entry.clone();
+        let page_width_for_bind = page_width.clone();
+        let visible_pages_for_bind = visible_pages.clone();
         factory.connect_bind(move |_, item| {
             let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
                 return;
@@ -445,10 +455,14 @@ impl PreviewState {
             let binding_name = format!("pdf-page-{page_index}");
             overlay.set_widget_name(&binding_name);
             overlay.set_tooltip_text(None);
-            overlay.set_size_request(-1, 560);
+            let target_width = page_width_for_bind.get();
+            overlay.set_size_request(if target_width > 0 { target_width } else { -1 }, 560);
             picture.set_paintable(gtk::gdk::Paintable::NONE);
             spinner.start();
             spinner.set_visible(true);
+            visible_pages_for_bind
+                .borrow_mut()
+                .insert(page_index, (overlay.clone(), picture.clone()));
 
             let is_initial_page = initial_page
                 .borrow()
@@ -460,7 +474,7 @@ impl PreviewState {
                 None
             };
             if let Some((_, png)) = cached {
-                set_pdf_page_texture(&overlay, &picture, png);
+                set_pdf_page_texture(&overlay, &picture, png, page_width_for_bind.get());
                 spinner.stop();
                 spinner.set_visible(false);
                 return;
@@ -472,6 +486,7 @@ impl PreviewState {
             let weak_picture = picture.downgrade();
             let weak_spinner = spinner.downgrade();
             let loads_for_event = loads.clone();
+            let page_width_for_event = page_width_for_bind.clone();
             let emit = Rc::new(move |event| {
                 loads_for_event.borrow_mut().remove(&page_index);
                 let Some(overlay) = weak_overlay
@@ -487,7 +502,12 @@ impl PreviewState {
                         ..
                     }) if response_id == request_id && page == page_index => {
                         if let Some(picture) = weak_picture.upgrade() {
-                            set_pdf_page_texture(&overlay, &picture, png);
+                            set_pdf_page_texture(
+                                &overlay,
+                                &picture,
+                                png,
+                                page_width_for_event.get(),
+                            );
                         }
                     }
                     PreviewEvent::Failed {
@@ -516,9 +536,12 @@ impl PreviewState {
         });
 
         let loads = self.pdf_loads.clone();
+        let visible_pages_for_unbind = visible_pages.clone();
         factory.connect_unbind(move |_, item| {
             if let Some(item) = item.downcast_ref::<gtk::ListItem>() {
-                loads.borrow_mut().remove(&(item.position() as i32));
+                let page = item.position() as i32;
+                loads.borrow_mut().remove(&page);
+                visible_pages_for_unbind.borrow_mut().remove(&page);
             }
         });
 
@@ -528,11 +551,110 @@ impl PreviewState {
         list.set_vexpand(true);
         let scroll = gtk::ScrolledWindow::builder()
             .child(&list)
-            .hscrollbar_policy(gtk::PolicyType::Never)
+            .hscrollbar_policy(gtk::PolicyType::Automatic)
             .vscrollbar_policy(gtk::PolicyType::Automatic)
             .hexpand(true)
             .vexpand(true)
             .build();
+
+        let zoom_scroll =
+            gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);
+        zoom_scroll.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let weak_scroll = scroll.downgrade();
+        let zoom_for_scroll = zoom.clone();
+        let page_width_for_scroll = page_width.clone();
+        let visible_pages_for_scroll = visible_pages.clone();
+        zoom_scroll.connect_scroll(move |controller, _, dy| {
+            if !controller
+                .current_event_state()
+                .contains(gtk::gdk::ModifierType::CONTROL_MASK)
+            {
+                return glib::Propagation::Proceed;
+            }
+            let Some(scroll) = weak_scroll.upgrade() else {
+                return glib::Propagation::Stop;
+            };
+            let previous = zoom_for_scroll.get();
+            let next = pdf_zoom_after_scroll(previous, dy);
+            if (next - previous).abs() < f64::EPSILON {
+                return glib::Propagation::Stop;
+            }
+            zoom_for_scroll.set(next);
+            let width = pdf_page_width(&scroll, next);
+            page_width_for_scroll.set(width);
+            resize_pdf_pages(&visible_pages_for_scroll.borrow(), width);
+            preserve_pdf_view_center(&scroll, next / previous);
+            glib::Propagation::Stop
+        });
+        scroll.add_controller(zoom_scroll);
+
+        let reset_zoom = gtk::EventControllerKey::new();
+        reset_zoom.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let weak_scroll = scroll.downgrade();
+        let zoom_for_reset = zoom.clone();
+        let page_width_for_reset = page_width.clone();
+        let visible_pages_for_reset = visible_pages.clone();
+        reset_zoom.connect_key_pressed(move |_, key, _, modifiers| {
+            if key.to_unicode() != Some('0')
+                || !modifiers.contains(gtk::gdk::ModifierType::CONTROL_MASK)
+            {
+                return glib::Propagation::Proceed;
+            }
+            let Some(scroll) = weak_scroll.upgrade() else {
+                return glib::Propagation::Stop;
+            };
+            zoom_for_reset.set(PDF_MIN_ZOOM);
+            let width = pdf_page_width(&scroll, PDF_MIN_ZOOM);
+            page_width_for_reset.set(width);
+            resize_pdf_pages(&visible_pages_for_reset.borrow(), width);
+            set_adjustment_value(&scroll.hadjustment(), 0.0);
+            glib::Propagation::Stop
+        });
+        list.add_controller(reset_zoom);
+
+        scroll.set_cursor_from_name(Some("grab"));
+        let drag_origin = Rc::new(Cell::new((0.0, 0.0)));
+        let pan = gtk::GestureDrag::new();
+        pan.set_button(1);
+        pan.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let weak_scroll = scroll.downgrade();
+        let drag_origin_for_begin = drag_origin.clone();
+        pan.connect_drag_begin(move |_, _, _| {
+            if let Some(scroll) = weak_scroll.upgrade() {
+                scroll.set_cursor_from_name(Some("grabbing"));
+                drag_origin_for_begin
+                    .set((scroll.hadjustment().value(), scroll.vadjustment().value()));
+            }
+        });
+        let weak_scroll = scroll.downgrade();
+        pan.connect_drag_update(move |_, offset_x, offset_y| {
+            let Some(scroll) = weak_scroll.upgrade() else {
+                return;
+            };
+            let (horizontal, vertical) = drag_origin.get();
+            set_adjustment_value(&scroll.hadjustment(), horizontal - offset_x);
+            set_adjustment_value(&scroll.vadjustment(), vertical - offset_y);
+        });
+        let weak_scroll = scroll.downgrade();
+        pan.connect_drag_end(move |_, _, _| {
+            if let Some(scroll) = weak_scroll.upgrade() {
+                scroll.set_cursor_from_name(Some("grab"));
+            }
+        });
+        scroll.add_controller(pan);
+
+        let zoom_for_tick = zoom.clone();
+        let page_width_for_tick = page_width.clone();
+        let visible_pages_for_tick = visible_pages.clone();
+        scroll.add_tick_callback(move |scroll, _| {
+            if scroll.width() > PDF_PAGE_GAP * 2 + 1 {
+                let width = pdf_page_width(scroll, zoom_for_tick.get());
+                if width != page_width_for_tick.replace(width) {
+                    resize_pdf_pages(&visible_pages_for_tick.borrow(), width);
+                }
+            }
+            glib::ControlFlow::Continue
+        });
         self.content.append(&scroll);
     }
 
@@ -582,15 +704,78 @@ fn metadata_value(label: &str) -> (gtk::Box, gtk::Label) {
     (group, value)
 }
 
-fn set_pdf_page_texture(overlay: &gtk::Overlay, picture: &gtk::Picture, png: Vec<u8>) {
+fn set_pdf_page_texture(
+    overlay: &gtk::Overlay,
+    picture: &gtk::Picture,
+    png: Vec<u8>,
+    target_width: i32,
+) {
     let Ok(texture) = gtk::gdk::Texture::from_bytes(&glib::Bytes::from_owned(png)) else {
         return;
     };
-    if texture.width() > 0 && texture.height() > 0 && overlay.width() > 0 {
-        let ratio = texture.width() as f64 / texture.height() as f64;
-        overlay.set_size_request(-1, (f64::from(overlay.width()) / ratio).round() as i32);
-    }
     picture.set_paintable(Some(&texture));
+    resize_pdf_page(overlay, picture, target_width);
+}
+
+fn pdf_zoom_after_scroll(current: f64, dy: f64) -> f64 {
+    (current * (-dy * 0.14).exp()).clamp(PDF_MIN_ZOOM, PDF_MAX_ZOOM)
+}
+
+fn pdf_page_width(scroll: &gtk::ScrolledWindow, zoom: f64) -> i32 {
+    let fit_width = scroll.width().saturating_sub(PDF_PAGE_GAP * 2).max(1);
+    (f64::from(fit_width) * zoom).round() as i32
+}
+
+fn resize_pdf_pages(pages: &HashMap<i32, (gtk::Overlay, gtk::Picture)>, width: i32) {
+    for (overlay, picture) in pages.values() {
+        resize_pdf_page(overlay, picture, width);
+    }
+}
+
+fn resize_pdf_page(overlay: &gtk::Overlay, picture: &gtk::Picture, target_width: i32) {
+    let Some(paintable) = picture.paintable() else {
+        overlay.set_size_request(if target_width > 0 { target_width } else { -1 }, 560);
+        return;
+    };
+    let texture_width = paintable.intrinsic_width();
+    let texture_height = paintable.intrinsic_height();
+    let width = if target_width > 0 {
+        target_width
+    } else if overlay.width() > 1 {
+        overlay.width()
+    } else {
+        return;
+    };
+    if texture_width > 0 && texture_height > 0 {
+        let ratio = f64::from(texture_width) / f64::from(texture_height);
+        overlay.set_size_request(width, (f64::from(width) / ratio).round() as i32);
+    }
+}
+
+fn preserve_pdf_view_center(scroll: &gtk::ScrolledWindow, factor: f64) {
+    let horizontal = scroll.hadjustment();
+    let vertical = scroll.vadjustment();
+    let horizontal_center = horizontal.value() + horizontal.page_size() / 2.0;
+    let vertical_center = vertical.value() + vertical.page_size() / 2.0;
+    glib::idle_add_local_once(glib::clone!(
+        #[weak]
+        scroll,
+        move || {
+            set_adjustment_value(
+                &scroll.hadjustment(),
+                horizontal_center * factor - scroll.hadjustment().page_size() / 2.0,
+            );
+            set_adjustment_value(
+                &scroll.vadjustment(),
+                vertical_center * factor - scroll.vadjustment().page_size() / 2.0,
+            );
+        }
+    ));
+}
+
+fn set_adjustment_value(adjustment: &gtk::Adjustment, value: f64) {
+    let maximum = (adjustment.upper() - adjustment.page_size()).max(adjustment.lower());
+    adjustment.set_value(value.clamp(adjustment.lower(), maximum));
 }
 
 fn clear_box(box_: &gtk::Box) {
