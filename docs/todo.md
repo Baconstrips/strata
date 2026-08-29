@@ -89,7 +89,8 @@ Legend: **P0** blocks the milestone, **P1** is required for its exit criteria, *
 ### Keyboard and selection
 
 - [x] **P0** Arrow and `h/j/k/l` navigation
-- [ ] **P0** Enter/open, Escape/cancel, and Space/preview actions
+- [x] **P0** Enter/open and Escape/close-peek-or-column actions
+- [ ] **P0** Space/preview action
 - [ ] **P0** Define focus transfer between sidebar, columns, location, search, and preview
 - [x] **P1** Visible distinction between focus and selection
 - [ ] **P1** Multi-selection model and modifier behavior
@@ -99,7 +100,8 @@ Legend: **P0** blocks the milestone, **P1** is required for its exit criteria, *
 
 - [x] **P0** Hidden-file toggle
 - [x] **P0** Stable sorting by name, type, size, and modified time
-- [ ] **P0** Directory monitoring with incremental updates
+- [x] **P0** Monitor directory changes and reload affected columns
+- [ ] **P0** Apply directory-monitor changes incrementally without a full reload
 - [x] **P0** Preserve UI responsiveness in 100k-entry fixture
 - [ ] **P1** Handle invalid UTF-8 display names without losing native paths
 - [ ] **P1** Handle broken symlinks and files disappearing during navigation
@@ -107,7 +109,7 @@ Legend: **P0** blocks the milestone, **P1** is required for its exit criteria, *
 
 ### Sidebar
 
-- [ ] **P0** Resolve standard user directories instead of assuming English folder names
+- [x] **P0** Resolve standard user directories instead of assuming English folder names
 - [ ] **P0** Add mounted volumes and Trash
 - [ ] **P1** Add, remove, activate, and reorder bookmarks
 - [ ] **P1** Collapse sidebar with mouse and keyboard
