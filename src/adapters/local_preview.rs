@@ -53,7 +53,19 @@ impl PreviewProvider for LocalPreviewProvider {
                 };
             }
 
-            if matches!(content, PreviewContent::Text { .. }) {
+            if matches!(content, PreviewContent::Pdf { .. }) {
+                content = match render_pdf(&file, request.pdf_page).await {
+                    Ok((png, page, pages)) => PreviewContent::Pdf { png, page, pages },
+                    Err(message) => {
+                        emit(PreviewEvent::Failed {
+                            request_id,
+                            entry,
+                            message,
+                        });
+                        return;
+                    }
+                };
+            } else if matches!(content, PreviewContent::Text { .. }) {
                 content = match read_text(&file, request.text_byte_limit).await {
                     Ok((content, truncated)) => PreviewContent::Text { content, truncated },
                     Err(error) => {
@@ -86,6 +98,53 @@ fn file_for_location(location: &Location) -> gio::File {
         .unwrap_or_else(|| gio::File::for_uri(location.uri_value().unwrap_or_default()))
 }
 
+async fn render_pdf(file: &gio::File, page: i32) -> Result<(Vec<u8>, i32, i32), String> {
+    let uri = file.uri().to_string();
+    gio::spawn_blocking(move || render_pdf_blocking(&uri, page))
+        .await
+        .map_err(|_| "The PDF renderer stopped unexpectedly".to_owned())?
+}
+
+fn render_pdf_blocking(uri: &str, requested_page: i32) -> Result<(Vec<u8>, i32, i32), String> {
+    const MAX_WIDTH: f64 = 1400.0;
+    const MAX_HEIGHT: f64 = 1800.0;
+    const MAX_PIXELS: f64 = 2_500_000.0;
+
+    let document = poppler::Document::from_file(uri, None).map_err(|error| error.to_string())?;
+    let pages = document.n_pages();
+    if pages <= 0 {
+        return Err("This PDF has no pages".to_owned());
+    }
+    let page_index = requested_page.clamp(0, pages - 1);
+    let page = document
+        .page(page_index)
+        .ok_or_else(|| "Unable to load that PDF page".to_owned())?;
+    let (page_width, page_height) = page.size();
+    if page_width <= 0.0 || page_height <= 0.0 {
+        return Err("The PDF page has invalid dimensions".to_owned());
+    }
+
+    let scale = (MAX_WIDTH / page_width)
+        .min(MAX_HEIGHT / page_height)
+        .min((MAX_PIXELS / (page_width * page_height)).sqrt());
+    let width = (page_width * scale).ceil() as i32;
+    let height = (page_height * scale).ceil() as i32;
+    let surface = cairo::ImageSurface::create(cairo::Format::ARgb32, width, height)
+        .map_err(|error| error.to_string())?;
+    let context = cairo::Context::new(&surface).map_err(|error| error.to_string())?;
+    context.set_source_rgb(1.0, 1.0, 1.0);
+    context.paint().map_err(|error| error.to_string())?;
+    context.scale(scale, scale);
+    page.render(&context);
+    surface.flush();
+
+    let mut png = Vec::new();
+    surface
+        .write_to_png(&mut png)
+        .map_err(|error| error.to_string())?;
+    Ok((png, page_index, pages))
+}
+
 async fn read_text(file: &gio::File, byte_limit: usize) -> Result<(String, bool), glib::Error> {
     let stream = file.read_future(glib::Priority::DEFAULT).await?;
     let bytes = stream
@@ -96,3 +155,6 @@ async fn read_text(file: &gio::File, byte_limit: usize) -> Result<(String, bool)
     let sample = &bytes[..bytes.len().min(byte_limit)];
     Ok((String::from_utf8_lossy(sample).into_owned(), truncated))
 }
+
+#[cfg(test)]
+mod tests;

@@ -7,7 +7,7 @@ Thanks for helping build Strata. The project is early, so discuss large changes 
 Install Rust, GTK4, Fontconfig, a C toolchain, and `pkg-config`. On Arch Linux:
 
 ```bash
-sudo pacman -S --needed base-devel rust fontconfig gtk4 gtksourceview5
+sudo pacman -S --needed base-devel rust fontconfig gtk4 gtksourceview5 poppler-glib
 ```
 
 Run the application:

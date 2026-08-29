@@ -14,6 +14,7 @@ pub struct PreviewRequest {
     pub id: PreviewRequestId,
     pub entry: FileEntry,
     pub text_byte_limit: usize,
+    pub pdf_page: i32,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -21,6 +22,7 @@ pub enum PreviewContent {
     Text { content: String, truncated: bool },
     Image,
     Media,
+    Pdf { png: Vec<u8>, page: i32, pages: i32 },
     Unsupported,
 }
 
@@ -47,7 +49,13 @@ pub trait PreviewProvider {
 }
 
 pub(crate) fn content_family(content_type: &str) -> PreviewContent {
-    if content_type.starts_with("image/") {
+    if content_type == "application/pdf" {
+        PreviewContent::Pdf {
+            png: Vec::new(),
+            page: 0,
+            pages: 0,
+        }
+    } else if content_type.starts_with("image/") {
         PreviewContent::Image
     } else if content_type.starts_with("audio/") || content_type.starts_with("video/") {
         PreviewContent::Media

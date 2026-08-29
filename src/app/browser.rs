@@ -70,6 +70,9 @@ pub enum BrowserEvent {
     PreviewRequested {
         entry: FileEntry,
     },
+    OpenRequested {
+        location: Location,
+    },
     NavigationRejected {
         message: String,
     },
@@ -377,6 +380,18 @@ impl Browser {
         self.state.borrow().active_child_position(depth)
     }
 
+    pub fn preview(self: &Rc<Self>, depth: usize, position: usize) {
+        self.select(depth, position);
+        let Some(entry) = self.entry_at(depth, position) else {
+            return;
+        };
+        if entry.is_directory() {
+            self.descend(depth, entry.location);
+        } else {
+            self.emit(BrowserEvent::PreviewRequested { entry });
+        }
+    }
+
     pub fn activate(self: &Rc<Self>, depth: usize, position: usize) {
         self.select(depth, position);
         self.activate_focused();
@@ -409,7 +424,9 @@ impl Browser {
         if entry.is_directory() {
             self.descend(depth, entry.location);
         } else {
-            self.emit(BrowserEvent::PreviewRequested { entry });
+            self.emit(BrowserEvent::OpenRequested {
+                location: entry.location,
+            });
         }
     }
 

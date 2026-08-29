@@ -7,6 +7,10 @@ fn classifies_common_preview_content_types() {
     assert_eq!(content_family("image/png"), PreviewContent::Image);
     assert_eq!(content_family("video/mp4"), PreviewContent::Media);
     assert!(matches!(
+        content_family("application/pdf"),
+        PreviewContent::Pdf { .. }
+    ));
+    assert!(matches!(
         content_family("text/x-rust"),
         PreviewContent::Text { .. }
     ));

@@ -508,7 +508,26 @@ fn committing_a_peek_descends_and_creates_history() {
 }
 
 #[test]
-fn activating_a_file_requests_a_preview_instead_of_opening_an_external_app() {
+fn single_click_action_descends_into_directories() {
+    let browser = Browser::new(Rc::new(FakeFileSource));
+    let events = Rc::new(RefCell::new(Vec::new()));
+    let observed = events.clone();
+    browser.observe(move |event| observed.borrow_mut().push(event));
+    browser.navigate(Location::local("/fixture"));
+    events.borrow_mut().clear();
+
+    browser.preview(0, 0);
+
+    assert!(
+        events
+            .borrow()
+            .iter()
+            .any(|event| matches!(event, BrowserEvent::ColumnAdded { depth: 1, .. }))
+    );
+}
+
+#[test]
+fn preview_and_open_are_distinct_file_actions() {
     let browser = Browser::new(Rc::new(FilePreviewSource));
     let events = Rc::new(RefCell::new(Vec::new()));
     let observed = events.clone();
@@ -516,12 +535,21 @@ fn activating_a_file_requests_a_preview_instead_of_opening_an_external_app() {
     browser.navigate(Location::local("/fixture"));
     events.borrow_mut().clear();
 
-    browser.activate(0, 0);
+    browser.preview(0, 0);
 
     assert!(events.borrow().iter().any(|event| matches!(
         event,
         BrowserEvent::PreviewRequested { entry }
             if entry.location == Location::local("/fixture/example.conf")
+    )));
+    events.borrow_mut().clear();
+
+    browser.activate(0, 0);
+
+    assert!(events.borrow().iter().any(|event| matches!(
+        event,
+        BrowserEvent::OpenRequested { location }
+            if location == &Location::local("/fixture/example.conf")
     )));
 }
 

@@ -438,8 +438,7 @@ paned > separator {
 
 .preview-metadata {
   border-bottom: 1px solid alpha(@theme_border, 0.24);
-  min-height: 50px;
-  padding: 9px 12px;
+  padding: 10px 12px;
 }
 
 .preview-metadata-label {
@@ -483,6 +482,15 @@ paned > separator {
   color: @theme_dim_text;
   font-size: 0.8em;
   padding: 6px 10px;
+}
+
+.preview-pdf-list,
+.preview-pdf-list > row {
+  background: @theme_surface;
+}
+
+.preview-pdf-list > row {
+  padding: 0 6px 6px;
 }
 
 .preview-feedback {

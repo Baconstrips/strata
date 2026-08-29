@@ -7,7 +7,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use gtk::{glib, prelude::*};
+use gtk::{gio, glib, prelude::*};
 
 use crate::{
     app::{Browser, BrowserEvent},
@@ -45,6 +45,7 @@ struct ColumnView {
     filter_entry: gtk::Entry,
     filter_button: gtk::ToggleButton,
     selection: gtk::SingleSelection,
+    syncing_selection: Rc<Cell<bool>>,
     list: gtk::ListView,
     bound_rows: Rc<RefCell<Vec<BoundRow>>>,
     entry_count: Rc<Cell<usize>>,
@@ -584,7 +585,8 @@ impl ViewState {
                     }
                     column.entry_count.set(count);
                     set_filter_placeholder(column, count);
-                    column.selection.set_selected(
+                    set_column_selection(
+                        column,
                         selected
                             .and_then(|position| filtered_position_for_source(column, position))
                             .unwrap_or(gtk::INVALID_LIST_POSITION),
@@ -664,7 +666,7 @@ impl ViewState {
                 if let Some(column) = self.columns.borrow().get(depth) {
                     if let Some(filtered_position) = filtered_position_for_source(column, position)
                     {
-                        column.selection.set_selected(filtered_position);
+                        set_column_selection(column, filtered_position);
                         column
                             .list
                             .scroll_to(filtered_position, gtk::ListScrollFlags::NONE, None);
@@ -676,7 +678,7 @@ impl ViewState {
                     if let Some(filtered_position) =
                         position.and_then(|position| filtered_position_for_source(column, position))
                     {
-                        column.selection.set_selected(filtered_position);
+                        set_column_selection(column, filtered_position);
                         column
                             .list
                             .scroll_to(filtered_position, gtk::ListScrollFlags::FOCUS, None);
@@ -685,6 +687,9 @@ impl ViewState {
                 }
             }
             BrowserEvent::PreviewRequested { .. } => {}
+            BrowserEvent::OpenRequested { location } => {
+                open_location(&location, &self.overlay);
+            }
             BrowserEvent::NavigationRejected { message } => {
                 show_error_dialog(&self.overlay, "Unable to open directory", &message);
             }
@@ -801,6 +806,26 @@ impl ViewState {
         let filtered_model = gtk::FilterListModel::new(Some(model.clone()), Some(filter.clone()));
         let selection = gtk::SingleSelection::new(Some(filtered_model.clone()));
         selection.set_autoselect(false);
+        let syncing_selection = Rc::new(Cell::new(false));
+        let weak_browser = Rc::downgrade(&self.browser);
+        let source_for_selection = model.clone();
+        let filtered_for_selection = filtered_model.clone();
+        let syncing_selection_changed = syncing_selection.clone();
+        selection.connect_selected_notify(move |selection| {
+            if syncing_selection_changed.get() {
+                return;
+            }
+            let source_position = source_position_for_filtered(
+                &source_for_selection,
+                &filtered_for_selection,
+                selection.selected(),
+            );
+            if let (Some(browser), Some(source_position)) =
+                (weak_browser.upgrade(), source_position)
+            {
+                browser.preview(depth, source_position);
+            }
+        });
         filter_entry.connect_changed(move |entry| {
             *filter_query.borrow_mut() = entry.text().to_lowercase();
             filter.changed(gtk::FilterChange::Different);
@@ -938,7 +963,7 @@ impl ViewState {
 
         let list = gtk::ListView::new(Some(selection.clone()), Some(factory));
         list.add_css_class("file-list");
-        list.set_single_click_activate(true);
+        list.set_single_click_activate(false);
         list.set_vexpand(true);
 
         let weak_browser = Rc::downgrade(&self.browser);
@@ -994,6 +1019,7 @@ impl ViewState {
             filter_entry,
             filter_button,
             selection,
+            syncing_selection,
             list,
             bound_rows,
             entry_count,
@@ -1333,6 +1359,12 @@ fn source_position_for_filtered(
         .map(|position| position as usize)
 }
 
+fn set_column_selection(column: &ColumnView, position: u32) {
+    column.syncing_selection.set(true);
+    column.selection.set_selected(position);
+    column.syncing_selection.set(false);
+}
+
 fn filtered_position_for_source(column: &ColumnView, source_position: usize) -> Option<u32> {
     let item = column.model.item(source_position as u32)?;
     (0..column.filtered_model.n_items()).find(|position| {
@@ -1633,6 +1665,18 @@ fn animate_horizontal_scroll(
             glib::ControlFlow::Continue
         }
     });
+}
+
+fn open_location(location: &Location, parent: &impl IsA<gtk::Widget>) {
+    let file = location
+        .native_path()
+        .map(gio::File::for_path)
+        .unwrap_or_else(|| gio::File::for_uri(location.uri_value().unwrap_or_default()));
+    let uri = file.uri();
+    if let Err(error) = gio::AppInfo::launch_default_for_uri(&uri, None::<&gio::AppLaunchContext>) {
+        tracing::warn!(location = %location.display_path(), error = %error, "unable to open file");
+        show_error_dialog(parent, "Unable to open file", &error.to_string());
+    }
 }
 
 fn show_error_dialog(parent: &impl IsA<gtk::Widget>, message: &str, detail: &str) {

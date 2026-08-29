@@ -177,7 +177,7 @@ Legend: **P0** blocks the milestone, **P1** is required for its exit criteria, *
 - [x] **P0** Common image formats
 - [x] **P0** Bounded plain text and source preview
 - [ ] **P1** Markdown rendering
-- [ ] **P1** PDF first page
+- [x] **P1** PDF first page
 - [ ] **P1** Audio metadata and artwork
 - [ ] **P1** Video metadata and thumbnail
 - [ ] **P1** Directory summary

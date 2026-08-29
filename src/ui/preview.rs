@@ -2,6 +2,7 @@
 
 use std::{
     cell::{Cell, RefCell},
+    collections::HashMap,
     rc::Rc,
     time::{Duration, Instant},
 };
@@ -35,6 +36,7 @@ struct PreviewState {
     split: RefCell<Option<gtk::Paned>>,
     current: RefCell<Option<FileEntry>>,
     load: RefCell<Option<LoadHandle>>,
+    pdf_loads: Rc<RefCell<HashMap<i32, LoadHandle>>>,
     current_request: Cell<Option<PreviewRequestId>>,
     next_request: Cell<u64>,
     opened: Cell<bool>,
@@ -111,6 +113,7 @@ impl PreviewDrawer {
             split: RefCell::new(None),
             current: RefCell::new(None),
             load: RefCell::new(None),
+            pdf_loads: Rc::new(RefCell::new(HashMap::new())),
             current_request: Cell::new(None),
             next_request: Cell::new(1),
             opened: Cell::new(false),
@@ -185,7 +188,7 @@ impl PreviewState {
             }
         }
         if !was_open || !already_showing {
-            self.load(entry);
+            self.load(entry, 0);
         }
     }
 
@@ -242,6 +245,7 @@ impl PreviewState {
             .set(self.animation_generation.get().saturating_add(1));
         self.current_request.set(None);
         self.load.borrow_mut().take();
+        self.pdf_loads.borrow_mut().clear();
         self.revealer.set_transition_duration(0);
         self.revealer.set_reveal_child(false);
         if let Some(split) = self.split.borrow().as_ref() {
@@ -250,7 +254,7 @@ impl PreviewState {
         self.pane.set_size_request(MIN_WIDTH, -1);
     }
 
-    fn load(self: &Rc<Self>, entry: FileEntry) {
+    fn load(self: &Rc<Self>, entry: FileEntry, pdf_page: i32) {
         self.current.replace(Some(entry.clone()));
         self.title.set_text(&entry.display_name);
         self.title
@@ -260,6 +264,7 @@ impl PreviewState {
         self.content_type.set_text(file_extension(&entry));
         self.show_loading();
         self.load.borrow_mut().take();
+        self.pdf_loads.borrow_mut().clear();
 
         let request_id = PreviewRequestId(self.next_request.get());
         self.next_request
@@ -277,13 +282,14 @@ impl PreviewState {
                 id: request_id,
                 entry,
                 text_byte_limit: TEXT_BYTE_LIMIT,
+                pdf_page,
             },
             emit,
         );
         self.load.replace(Some(load));
     }
 
-    fn handle_event(&self, expected: PreviewRequestId, event: PreviewEvent) {
+    fn handle_event(self: &Rc<Self>, expected: PreviewRequestId, event: PreviewEvent) {
         if self.current_request.get() != Some(expected) {
             return;
         }
@@ -307,7 +313,7 @@ impl PreviewState {
         }
     }
 
-    fn render(&self, preview: Preview) {
+    fn render(self: &Rc<Self>, preview: Preview) {
         self.content_type.set_text(&preview.content_type);
         clear_box(&self.content);
         match preview.content {
@@ -371,6 +377,9 @@ impl PreviewState {
                 video.set_vexpand(true);
                 self.content.append(&video);
             }
+            PreviewContent::Pdf { png, page, pages } => {
+                self.render_pdf_viewer(preview.entry, png, page, pages);
+            }
             PreviewContent::Unsupported => {
                 self.show_message(
                     "No visual preview",
@@ -378,6 +387,153 @@ impl PreviewState {
                 );
             }
         }
+    }
+
+    fn render_pdf_viewer(
+        self: &Rc<Self>,
+        entry: FileEntry,
+        initial_png: Vec<u8>,
+        initial_page: i32,
+        pages: i32,
+    ) {
+        let page_count = pages.clamp(0, 10_000);
+        let labels: Vec<_> = (1..=page_count).map(|page| page.to_string()).collect();
+        let labels: Vec<_> = labels.iter().map(String::as_str).collect();
+        let model = gtk::StringList::new(&labels);
+        let selection = gtk::NoSelection::new(Some(model));
+        let factory = gtk::SignalListItemFactory::new();
+
+        factory.connect_setup(|_, item| {
+            let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
+                return;
+            };
+            let overlay = gtk::Overlay::new();
+            let picture = gtk::Picture::new();
+            picture.set_can_shrink(true);
+            picture.set_content_fit(gtk::ContentFit::Contain);
+            picture.set_hexpand(true);
+            picture.set_vexpand(true);
+            let spinner = gtk::Spinner::new();
+            spinner.set_halign(gtk::Align::Center);
+            spinner.set_valign(gtk::Align::Center);
+            overlay.set_child(Some(&picture));
+            overlay.add_overlay(&spinner);
+            overlay.set_hexpand(true);
+            overlay.set_size_request(-1, 560);
+            item.set_child(Some(&overlay));
+        });
+
+        let provider = self.provider.clone();
+        let loads = self.pdf_loads.clone();
+        let initial_page = Rc::new(RefCell::new(Some((initial_page, initial_png))));
+        let next_request = Rc::new(Cell::new(self.next_request.get().saturating_add(10_000)));
+        let entry_for_bind = entry.clone();
+        factory.connect_bind(move |_, item| {
+            let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
+                return;
+            };
+            let page_index = item.position() as i32;
+            let Some(overlay) = item.child().and_downcast::<gtk::Overlay>() else {
+                return;
+            };
+            let Some(picture) = overlay.child().and_downcast::<gtk::Picture>() else {
+                return;
+            };
+            let Some(spinner) = overlay.last_child().and_downcast::<gtk::Spinner>() else {
+                return;
+            };
+            let binding_name = format!("pdf-page-{page_index}");
+            overlay.set_widget_name(&binding_name);
+            overlay.set_tooltip_text(None);
+            overlay.set_size_request(-1, 560);
+            picture.set_paintable(gtk::gdk::Paintable::NONE);
+            spinner.start();
+            spinner.set_visible(true);
+
+            let is_initial_page = initial_page
+                .borrow()
+                .as_ref()
+                .is_some_and(|(page, _)| *page == page_index);
+            let cached = if is_initial_page {
+                initial_page.borrow_mut().take()
+            } else {
+                None
+            };
+            if let Some((_, png)) = cached {
+                set_pdf_page_texture(&overlay, &picture, png);
+                spinner.stop();
+                spinner.set_visible(false);
+                return;
+            }
+
+            let request_id = PreviewRequestId(next_request.get());
+            next_request.set(next_request.get().saturating_add(1));
+            let weak_overlay = overlay.downgrade();
+            let weak_picture = picture.downgrade();
+            let weak_spinner = spinner.downgrade();
+            let loads_for_event = loads.clone();
+            let emit = Rc::new(move |event| {
+                loads_for_event.borrow_mut().remove(&page_index);
+                let Some(overlay) = weak_overlay
+                    .upgrade()
+                    .filter(|overlay| overlay.widget_name() == binding_name)
+                else {
+                    return;
+                };
+                match event {
+                    PreviewEvent::Ready(Preview {
+                        request_id: response_id,
+                        content: PreviewContent::Pdf { png, page, .. },
+                        ..
+                    }) if response_id == request_id && page == page_index => {
+                        if let Some(picture) = weak_picture.upgrade() {
+                            set_pdf_page_texture(&overlay, &picture, png);
+                        }
+                    }
+                    PreviewEvent::Failed {
+                        request_id: response_id,
+                        ..
+                    } if response_id == request_id => {
+                        overlay.set_tooltip_text(Some("Unable to render this PDF page"));
+                    }
+                    PreviewEvent::Ready(_) | PreviewEvent::Failed { .. } => return,
+                }
+                if let Some(spinner) = weak_spinner.upgrade() {
+                    spinner.stop();
+                    spinner.set_visible(false);
+                }
+            });
+            let load = provider.load(
+                PreviewRequest {
+                    id: request_id,
+                    entry: entry_for_bind.clone(),
+                    text_byte_limit: TEXT_BYTE_LIMIT,
+                    pdf_page: page_index,
+                },
+                emit,
+            );
+            loads.borrow_mut().insert(page_index, load);
+        });
+
+        let loads = self.pdf_loads.clone();
+        factory.connect_unbind(move |_, item| {
+            if let Some(item) = item.downcast_ref::<gtk::ListItem>() {
+                loads.borrow_mut().remove(&(item.position() as i32));
+            }
+        });
+
+        let list = gtk::ListView::new(Some(selection), Some(factory));
+        list.add_css_class("preview-pdf-list");
+        list.set_hexpand(true);
+        list.set_vexpand(true);
+        let scroll = gtk::ScrolledWindow::builder()
+            .child(&list)
+            .hscrollbar_policy(gtk::PolicyType::Never)
+            .vscrollbar_policy(gtk::PolicyType::Automatic)
+            .hexpand(true)
+            .vexpand(true)
+            .build();
+        self.content.append(&scroll);
     }
 
     fn show_loading(&self) {
@@ -413,6 +569,7 @@ impl PreviewState {
 fn metadata_value(label: &str) -> (gtk::Box, gtk::Label) {
     let group = gtk::Box::new(gtk::Orientation::Vertical, 2);
     group.set_hexpand(true);
+    group.set_valign(gtk::Align::Center);
     let heading = gtk::Label::new(Some(label));
     heading.add_css_class("preview-metadata-label");
     heading.set_xalign(0.0);
@@ -423,6 +580,17 @@ fn metadata_value(label: &str) -> (gtk::Box, gtk::Label) {
     group.append(&heading);
     group.append(&value);
     (group, value)
+}
+
+fn set_pdf_page_texture(overlay: &gtk::Overlay, picture: &gtk::Picture, png: Vec<u8>) {
+    let Ok(texture) = gtk::gdk::Texture::from_bytes(&glib::Bytes::from_owned(png)) else {
+        return;
+    };
+    if texture.width() > 0 && texture.height() > 0 && overlay.width() > 0 {
+        let ratio = texture.width() as f64 / texture.height() as f64;
+        overlay.set_size_request(-1, (f64::from(overlay.width()) / ratio).round() as i32);
+    }
+    picture.set_paintable(Some(&texture));
 }
 
 fn clear_box(box_: &gtk::Box) {

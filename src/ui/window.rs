@@ -276,6 +276,10 @@ fn install_keyboard_navigation(
             preview.toggle(browser.focused_entry());
             return glib::Propagation::Stop;
         }
+        if key == gtk::gdk::Key::Escape && preview.is_open() {
+            preview.close();
+            return glib::Propagation::Stop;
+        }
 
         match (key, alt) {
             (gtk::gdk::Key::Left, true) => browser.back(),

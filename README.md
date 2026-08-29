@@ -62,13 +62,14 @@ The architectural boundaries and performance workflow are documented in [`docs/a
 - Rust 1.85 or newer
 - GTK 4.12 or newer
 - GtkSourceView 5
+- Poppler GLib
 - Fontconfig
 - A C toolchain and `pkg-config`
 
 On Arch Linux:
 
 ```bash
-sudo pacman -S --needed base-devel rust fontconfig gtk4 gtksourceview5
+sudo pacman -S --needed base-devel rust fontconfig gtk4 gtksourceview5 poppler-glib
 ```
 
 Run Strata:

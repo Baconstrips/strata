@@ -20,7 +20,7 @@ jobs:
       - name: Install native development libraries
         run: >-
           sudo apt-get update &&
-          sudo apt-get install --yes libfontconfig1-dev libgtk-4-dev libgtksourceview-5-dev
+          sudo apt-get install --yes libfontconfig1-dev libgtk-4-dev libgtksourceview-5-dev libpoppler-glib-dev
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -53,7 +53,7 @@ jobs:
       - name: Install native development libraries
         run: >-
           sudo apt-get update &&
-          sudo apt-get install --yes libfontconfig1-dev libgtk-4-dev libgtksourceview-5-dev
+          sudo apt-get install --yes libfontconfig1-dev libgtk-4-dev libgtksourceview-5-dev libpoppler-glib-dev
 
       - name: Install Rust 1.85
         uses: dtolnay/rust-toolchain@1.85.0

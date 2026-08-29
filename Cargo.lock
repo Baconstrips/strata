@@ -514,6 +514,33 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f6b464fbc74e149a392436b17d523f769e057cb6877f6a5c4618bc6f11800548"
 
 [[package]]
+name = "poppler-rs"
+version = "0.25.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f654ec8b83bca9adb0ea7e62194a1e5767a094d282d77630ff0ddb2edbc30139"
+dependencies = [
+ "cairo-rs",
+ "gio",
+ "glib",
+ "libc",
+ "poppler-sys-rs",
+]
+
+[[package]]
+name = "poppler-sys-rs"
+version = "0.25.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f59d8616943cf71be2a33d866dee973eaaa3e507eb21eb102c6424f773ea6ad"
+dependencies = [
+ "cairo-sys-rs",
+ "gio-sys",
+ "glib-sys",
+ "gobject-sys",
+ "libc",
+ "system-deps",
+]
+
+[[package]]
 name = "proc-macro-crate"
 version = "3.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -654,9 +681,11 @@ dependencies = [
 name = "strata"
 version = "0.1.0"
 dependencies = [
+ "cairo-rs",
  "gdk-pixbuf",
  "glib-build-tools",
  "gtk4",
+ "poppler-rs",
  "serde",
  "sourceview5",
  "toml 0.9.12+spec-1.1.0",
