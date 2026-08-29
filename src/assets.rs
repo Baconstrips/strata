@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use std::{
+    cell::RefCell,
     ffi::CString,
     fs, io,
+    io::Cursor,
     os::unix::ffi::OsStrExt,
     path::{Path, PathBuf},
 };
@@ -10,7 +12,8 @@ use std::{
 use gtk::{gdk, gio, glib};
 
 pub mod icons {
-    pub const ARROW_UP_DOWN: &str = "strata-arrow-up-down";
+    pub const ARROW_DOWN_WIDE_NARROW: &str = "strata-arrow-down-wide-narrow";
+    pub const ARROW_UP_NARROW_WIDE: &str = "strata-arrow-up-narrow-wide";
     pub const CHECK: &str = "strata-check";
     pub const CHECK_ON_PRIMARY: &str = "strata-check-on-primary";
     pub const CHEVRON_RIGHT: &str = "strata-chevron-right";
@@ -37,6 +40,7 @@ pub mod icons {
     pub const ROWS: &str = "strata-rows";
     pub const SEARCH: &str = "strata-search";
     pub const SETTINGS: &str = "strata-settings";
+    pub const SETTINGS_2: &str = "strata-settings-2";
     pub const SETTINGS_ACTIVE: &str = "strata-settings-active";
     pub const SLIDERS: &str = "strata-sliders-horizontal";
     pub const TERMINAL: &str = "strata-terminal";
@@ -47,6 +51,16 @@ pub mod icons {
 
 const FONT_VERSION: &str = "2.304";
 const JETBRAINS_MONO: &[u8] = include_bytes!("../data/fonts/JetBrainsMono[wght].ttf");
+
+struct PrimaryIcon {
+    image: glib::WeakRef<gtk::Image>,
+    name: String,
+}
+
+thread_local! {
+    static PRIMARY_ICON_COLOR: RefCell<String> = RefCell::new("#8bc9eb".to_owned());
+    static PRIMARY_ICONS: RefCell<Vec<PrimaryIcon>> = const { RefCell::new(Vec::new()) };
+}
 
 pub fn prepare() -> Result<(), Box<dyn std::error::Error>> {
     gio::resources_register_include!("strata.gresource")?;
@@ -68,6 +82,72 @@ pub fn register_icon_theme() {
     if let Some(display) = gdk::Display::default() {
         gtk::IconTheme::for_display(&display).add_resource_path("/io/github/lgse/Strata/icons");
     }
+}
+
+pub fn primary_icon(name: &str, pixel_size: i32) -> gtk::Image {
+    let image = gtk::Image::new();
+    image.set_pixel_size(pixel_size);
+    set_primary_icon(&image, name);
+    image
+}
+
+pub fn set_primary_icon(image: &gtk::Image, name: &str) {
+    let color = PRIMARY_ICON_COLOR.with(|color| color.borrow().clone());
+    apply_primary_icon(image, name, &color);
+    PRIMARY_ICONS.with(|icons| {
+        let mut icons = icons.borrow_mut();
+        icons.retain(|icon| icon.image.upgrade().is_some());
+        if let Some(icon) = icons
+            .iter_mut()
+            .find(|icon| icon.image.upgrade().as_ref() == Some(image))
+        {
+            icon.name = name.to_owned();
+            return;
+        }
+        let image_ref = glib::WeakRef::new();
+        image_ref.set(Some(image));
+        icons.push(PrimaryIcon {
+            image: image_ref,
+            name: name.to_owned(),
+        });
+    });
+}
+
+pub fn set_primary_icon_color(color: &str) {
+    PRIMARY_ICON_COLOR.with(|current| current.replace(color.to_owned()));
+    PRIMARY_ICONS.with(|icons| {
+        icons.borrow_mut().retain(|icon| {
+            let Some(image) = icon.image.upgrade() else {
+                return false;
+            };
+            apply_primary_icon(&image, &icon.name, color);
+            true
+        });
+    });
+}
+
+fn apply_primary_icon(image: &gtk::Image, name: &str, color: &str) {
+    image.set_icon_name(Some(name));
+    let Some(texture) = primary_icon_texture(name, color) else {
+        return;
+    };
+    image.set_paintable(Some(&texture));
+}
+
+fn primary_icon_texture(name: &str, color: &str) -> Option<gdk::Texture> {
+    let path = format!("/io/github/lgse/Strata/icons/scalable/actions/{name}.svg");
+    let data = gio::resources_lookup_data(&path, gio::ResourceLookupFlags::NONE).ok()?;
+    let source = std::str::from_utf8(data.as_ref()).ok()?;
+    let mut source = source.replace("#8bc9eb", color);
+    if name == icons::FOLDER {
+        source = source.replacen(
+            "fill=\"none\"",
+            &format!("fill=\"{color}\" fill-opacity=\"0.15\""),
+            1,
+        );
+    }
+    let pixbuf = gdk_pixbuf::Pixbuf::from_read(Cursor::new(source.into_bytes())).ok()?;
+    Some(gdk::Texture::for_pixbuf(&pixbuf))
 }
 
 fn write_if_changed(path: &Path, contents: &[u8]) -> io::Result<()> {

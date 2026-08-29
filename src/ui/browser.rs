@@ -350,11 +350,15 @@ impl BrowserView {
     }
 
     pub fn dismiss_focused_filter(&self) -> bool {
+        let focused = self.state.overlay.root().and_then(|root| root.focus());
         let columns = self.state.columns.borrow();
-        let Some(column) = columns
-            .iter()
-            .find(|column| column.filter_entry.has_focus())
-        else {
+        let Some(column) = columns.iter().find(|column| {
+            column.filter_entry.has_focus()
+                || focused.as_ref().is_some_and(|focused| {
+                    focused == column.filter_entry.upcast_ref::<gtk::Widget>()
+                        || focused.is_ancestor(&column.filter_entry)
+                })
+        }) else {
             return false;
         };
         column.filter_button.set_active(false);
@@ -414,9 +418,13 @@ impl ViewState {
         if let Some(home_index) = locations.iter().position(|crumb| crumb == &home) {
             locations.drain(..home_index);
         }
+        let starts_at_root = locations
+            .first()
+            .and_then(Location::native_path)
+            .is_some_and(|path| path == Path::new("/"));
         let last = locations.len().saturating_sub(1);
         for (index, crumb) in locations.into_iter().enumerate() {
-            if index > 0 {
+            if index > 0 && !(starts_at_root && index == 1) {
                 let separator = gtk::Label::new(Some("/"));
                 separator.add_css_class("breadcrumb-separator");
                 self.breadcrumbs.append(&separator);
@@ -466,6 +474,12 @@ impl ViewState {
             } else {
                 let button = gtk::Button::with_label(&label);
                 button.add_css_class("breadcrumb");
+                if crumb
+                    .native_path()
+                    .is_some_and(|path| path == Path::new("/"))
+                {
+                    button.add_css_class("breadcrumb-root");
+                }
                 button.set_has_frame(false);
                 button.set_tooltip_text(Some(&crumb.display_path()));
                 button.set_cursor_from_name(Some("pointer"));
@@ -699,6 +713,7 @@ impl ViewState {
         header.append(&spinner);
         let header_actions = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         header_actions.add_css_class("column-header-actions");
+        header_actions.append(&column_sort_direction_toggle(&self.browser, depth));
         header_actions.append(&column_sort_menu(&self.browser, depth));
 
         let filter_entry = gtk::Entry::builder()
@@ -885,11 +900,11 @@ impl ViewState {
             });
             set_active_path_style(&row, active);
             if let Some(entry) = entry.as_ref() {
-                icon.set_icon_name(Some(entry_icon(entry)));
+                crate::assets::set_primary_icon(&icon, entry_icon(entry));
                 icon.set_opacity(if entry.is_directory() { 1.0 } else { 0.72 });
                 chevron.set_visible(entry.is_directory());
             } else {
-                icon.set_icon_name(Some(crate::assets::icons::DOCUMENTS));
+                crate::assets::set_primary_icon(&icon, crate::assets::icons::DOCUMENTS);
                 icon.set_opacity(0.72);
                 chevron.set_visible(false);
             }
@@ -1250,11 +1265,14 @@ fn basic_label_factory() -> gtk::SignalListItemFactory {
         let name = model_display_name(&value);
         let directory = model_is_directory(&value);
         label.set_label(name);
-        icon.set_icon_name(Some(if directory {
-            crate::assets::icons::FOLDER
-        } else {
-            icon_for_name(name)
-        }));
+        crate::assets::set_primary_icon(
+            &icon,
+            if directory {
+                crate::assets::icons::FOLDER
+            } else {
+                icon_for_name(name)
+            },
+        );
         icon.set_opacity(if directory { 1.0 } else { 0.72 });
         chevron.set_visible(directory);
     });
@@ -1341,32 +1359,6 @@ fn column_sort_menu(browser: &Rc<Browser>, depth: usize) -> gtk::MenuButton {
     }
 
     content.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
-    let direction_heading = gtk::Label::new(Some("DIRECTION"));
-    direction_heading.set_xalign(0.0);
-    direction_heading.add_css_class("menu-heading");
-    content.append(&direction_heading);
-    let direction_checks: Rc<RefCell<Vec<gtk::Image>>> = Rc::new(RefCell::new(Vec::new()));
-    for (label, direction, selected) in [
-        ("Ascending (A-Z)", SortDirection::Ascending, true),
-        ("Descending (Z-A)", SortDirection::Descending, false),
-    ] {
-        let (option, check) = column_menu_option(label, selected);
-        direction_checks.borrow_mut().push(check.clone());
-        let index = direction_checks.borrow().len() - 1;
-        let checks = direction_checks.clone();
-        let weak_browser = Rc::downgrade(browser);
-        option.connect_clicked(move |_| {
-            for (check_index, check) in checks.borrow().iter().enumerate() {
-                check.set_visible(check_index == index);
-            }
-            if let Some(browser) = weak_browser.upgrade() {
-                browser.set_sort_direction(depth, direction);
-            }
-        });
-        content.append(&option);
-    }
-
-    content.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
     let (folders_first, folders_check) = column_menu_option("Folders first", true);
     let folders_enabled = Rc::new(Cell::new(true));
     let weak_browser = Rc::downgrade(browser);
@@ -1388,11 +1380,35 @@ fn column_sort_menu(browser: &Rc<Browser>, depth: usize) -> gtk::MenuButton {
         .build();
     popover.add_css_class("column-popover");
     let button = gtk::MenuButton::builder()
-        .icon_name(crate::assets::icons::ARROW_UP_DOWN)
-        .tooltip_text("Sort this pane")
+        .icon_name(crate::assets::icons::SETTINGS_2)
+        .tooltip_text("Choose sort field")
         .popover(&popover)
         .build();
     button.add_css_class("column-header-action");
+    button
+}
+
+fn column_sort_direction_toggle(browser: &Rc<Browser>, depth: usize) -> gtk::ToggleButton {
+    let button = gtk::ToggleButton::builder()
+        .icon_name(crate::assets::icons::ARROW_UP_NARROW_WIDE)
+        .tooltip_text("Ascending — click to reverse")
+        .build();
+    button.add_css_class("column-header-action");
+    let weak_browser = Rc::downgrade(browser);
+    button.connect_toggled(move |button| {
+        let direction = if button.is_active() {
+            button.set_icon_name(crate::assets::icons::ARROW_DOWN_WIDE_NARROW);
+            button.set_tooltip_text(Some("Descending — click to reverse"));
+            SortDirection::Descending
+        } else {
+            button.set_icon_name(crate::assets::icons::ARROW_UP_NARROW_WIDE);
+            button.set_tooltip_text(Some("Ascending — click to reverse"));
+            SortDirection::Ascending
+        };
+        if let Some(browser) = weak_browser.upgrade() {
+            browser.set_sort_direction(depth, direction);
+        }
+    });
     button
 }
 

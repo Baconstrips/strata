@@ -85,7 +85,7 @@ pub struct Browser {
     peek_load: RefCell<Option<LoadHandle>>,
     next_request: Cell<u64>,
     preferences: Cell<ViewPreferences>,
-    observer: RefCell<Option<Observer>>,
+    observers: RefCell<Vec<Observer>>,
 }
 
 impl Browser {
@@ -98,16 +98,16 @@ impl Browser {
             peek_load: RefCell::new(None),
             next_request: Cell::new(1),
             preferences: Cell::new(ViewPreferences::default()),
-            observer: RefCell::new(None),
+            observers: RefCell::new(Vec::new()),
         })
     }
 
     pub fn observe(&self, observer: impl Fn(BrowserEvent) + 'static) {
-        self.observer.replace(Some(Rc::new(observer)));
+        self.observers.borrow_mut().push(Rc::new(observer));
     }
 
     pub fn clear_observer(&self) {
-        self.observer.take();
+        self.observers.borrow_mut().clear();
     }
 
     pub fn navigate_input(self: &Rc<Self>, input: &str) -> Result<(), LocationValidationError> {
@@ -582,9 +582,9 @@ impl Browser {
     }
 
     fn emit(&self, event: BrowserEvent) {
-        let observer = self.observer.borrow().clone();
-        if let Some(observer) = observer {
-            observer(event);
+        let observers = self.observers.borrow().clone();
+        for observer in observers {
+            observer(event.clone());
         }
     }
 

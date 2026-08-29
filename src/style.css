@@ -180,10 +180,15 @@ headerbar menubutton.header-action > button:checked {
   background: alpha(@theme_muted, 0.72);
 }
 
-.breadcrumb-separator {
+.breadcrumb-separator,
+.breadcrumb.breadcrumb-root {
   color: @theme_dim_text;
   font-size: 1.15em;
   margin: 0 2px;
+}
+
+.breadcrumb.breadcrumb-root {
+  padding: 0;
 }
 
 .location-entry.error {
@@ -334,6 +339,12 @@ switch:checked slider {
 
 .sidebar-row:hover {
   background: alpha(@theme_muted, 0.38);
+}
+
+.sidebar-row.active,
+.sidebar-row.active:hover {
+  background: alpha(@theme_highlight, 0.82);
+  color: @theme_accent;
 }
 
 .sidebar-row.reorderable.dragging {

@@ -359,6 +359,7 @@ struct SidebarState {
     browser: Rc<Browser>,
     volume_monitor: gio::VolumeMonitor,
     place_order: RefCell<Vec<&'static str>>,
+    place_rows: RefCell<Vec<(Location, gtk::Button)>>,
 }
 
 struct SidebarView {
@@ -380,6 +381,7 @@ impl SidebarState {
         while let Some(child) = self.widget.first_child() {
             self.widget.remove(&child);
         }
+        self.place_rows.borrow_mut().clear();
 
         self.append_place(
             crate::assets::icons::HOME,
@@ -395,7 +397,9 @@ impl SidebarState {
 
         for place in self.place_order.borrow().clone() {
             if let Some((icon, name, directory)) = standard_place(place) {
-                if let Some(path) = glib::user_special_dir(directory) {
+                if let Some(path) = glib::user_special_dir(directory)
+                    .filter(|path| should_show_standard_place(place, path, &home_directory()))
+                {
                     self.append_reorderable_place(place, icon, name, Location::local(path));
                 }
             }
@@ -425,6 +429,28 @@ impl SidebarState {
                 self.append_place(crate::assets::icons::HARD_DRIVE, &name, location);
             }
         }
+        self.sync_active_place();
+    }
+
+    fn sync_active_place(&self) {
+        let active = self.browser.active_location();
+        let rows = self.place_rows.borrow();
+        let selected = rows
+            .iter()
+            .position(|(location, row)| {
+                active.as_ref() == Some(location) && row.has_css_class("active")
+            })
+            .or_else(|| {
+                rows.iter()
+                    .position(|(location, _)| active.as_ref() == Some(location))
+            });
+        for (index, (_, row)) in rows.iter().enumerate() {
+            if selected == Some(index) {
+                row.add_css_class("active");
+            } else {
+                row.remove_css_class("active");
+            }
+        }
     }
 
     fn append_reorderable_place(
@@ -438,8 +464,14 @@ impl SidebarState {
         row.add_css_class("reorderable");
         row.set_cursor_from_name(Some("grab"));
         row.set_tooltip_text(Some(&location.display_path()));
+        self.place_rows
+            .borrow_mut()
+            .push((location.clone(), row.clone()));
         let weak_browser = Rc::downgrade(&self.browser);
+        let sidebar = self.widget.clone();
+        let selected_row = row.clone();
         row.connect_clicked(move |_| {
+            select_sidebar_row(&sidebar, &selected_row);
             if let Some(browser) = weak_browser.upgrade() {
                 browser.navigate(location.clone());
             }
@@ -500,8 +532,19 @@ impl SidebarState {
         let name = volume.name().to_string();
         let row = sidebar_button(crate::assets::icons::HARD_DRIVE, &name);
         row.set_tooltip_text(Some(&name));
+        if let Some(mount) = volume.get_mount() {
+            let root = mount.root();
+            let location = root
+                .path()
+                .map(Location::local)
+                .unwrap_or_else(|| Location::uri(root.uri()));
+            self.place_rows.borrow_mut().push((location, row.clone()));
+        }
         let weak_browser = Rc::downgrade(&self.browser);
+        let sidebar = self.widget.clone();
+        let selected_row = row.clone();
         row.connect_clicked(move |button| {
+            select_sidebar_row(&sidebar, &selected_row);
             let Some(browser) = weak_browser.upgrade() else {
                 return;
             };
@@ -540,14 +583,31 @@ impl SidebarState {
     fn append_place(&self, icon: &str, name: &str, location: Location) {
         let row = sidebar_button(icon, name);
         row.set_tooltip_text(Some(&location.display_path()));
+        self.place_rows
+            .borrow_mut()
+            .push((location.clone(), row.clone()));
         let weak_browser = Rc::downgrade(&self.browser);
+        let sidebar = self.widget.clone();
+        let selected_row = row.clone();
         row.connect_clicked(move |_| {
+            select_sidebar_row(&sidebar, &selected_row);
             if let Some(browser) = weak_browser.upgrade() {
                 browser.navigate(location.clone());
             }
         });
         self.widget.append(&row);
     }
+}
+
+fn select_sidebar_row(sidebar: &gtk::Box, selected: &gtk::Button) {
+    let mut child = sidebar.first_child();
+    while let Some(widget) = child {
+        if let Ok(row) = widget.clone().downcast::<gtk::Button>() {
+            row.remove_css_class("active");
+        }
+        child = widget.next_sibling();
+    }
+    selected.add_css_class("active");
 }
 
 fn reorder_places(order: &mut Vec<&'static str>, source: &str, target: &str, after: bool) -> bool {
@@ -564,6 +624,10 @@ fn reorder_places(order: &mut Vec<&'static str>, source: &str, target: &str, aft
     };
     order.insert(target_index + usize::from(after), source);
     true
+}
+
+fn should_show_standard_place(id: &str, path: &std::path::Path, home: &std::path::Path) -> bool {
+    id != "desktop" || path != home
 }
 
 fn standard_place(id: &str) -> Option<(&'static str, &'static str, glib::UserDirectory)> {
@@ -599,8 +663,7 @@ fn standard_place(id: &str) -> Option<(&'static str, &'static str, glib::UserDir
 
 fn sidebar_button(icon: &str, name: &str) -> gtk::Button {
     let content = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-    let image = gtk::Image::from_icon_name(icon);
-    image.set_pixel_size(17);
+    let image = crate::assets::primary_icon(icon, 17);
     let label = gtk::Label::new(Some(name));
     label.set_xalign(0.0);
     label.set_hexpand(true);
@@ -647,6 +710,14 @@ fn build_sidebar(browser: Rc<Browser>) -> SidebarView {
             "pictures",
             "videos",
         ]),
+        place_rows: RefCell::new(Vec::new()),
+    });
+
+    let weak = Rc::downgrade(&state);
+    state.browser.observe(move |_| {
+        if let Some(state) = weak.upgrade() {
+            state.sync_active_place();
+        }
     });
 
     let mut handlers = Vec::new();
