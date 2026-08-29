@@ -63,9 +63,10 @@ pub enum BrowserEvent {
         depth: usize,
         position: Option<usize>,
     },
-    SelectionChanged {
+    SelectionSetChanged {
         depth: usize,
-        position: usize,
+        positions: Vec<usize>,
+        focused: usize,
     },
     PreviewRequested {
         entry: FileEntry,
@@ -326,10 +327,14 @@ impl Browser {
             update(&mut preferences);
             state.set_column_preferences(depth, preferences)
         };
-        if let Some((entries, selected)) = result {
+        if let Some((entries, focused, positions)) = result {
             self.emit(BrowserEvent::EntriesReplaced { depth, entries });
-            if let Some(position) = selected {
-                self.emit(BrowserEvent::SelectionChanged { depth, position });
+            if let Some(focused) = focused {
+                self.emit(BrowserEvent::SelectionSetChanged {
+                    depth,
+                    positions,
+                    focused,
+                });
             }
         }
     }
@@ -376,6 +381,17 @@ impl Browser {
             .map(|(_, _, entry)| entry)
     }
 
+    pub fn set_selection(&self, depth: usize, positions: &[usize], focused: Option<usize>) {
+        let mut state = self.state.borrow_mut();
+        if state.set_selection(depth, positions, focused) {
+            tracing::debug!(
+                depth,
+                selected = state.selected_entries().len(),
+                "selection changed"
+            );
+        }
+    }
+
     pub fn active_child_position(&self, depth: usize) -> Option<usize> {
         self.state.borrow().active_child_position(depth)
     }
@@ -403,6 +419,17 @@ impl Browser {
             self.emit(BrowserEvent::FocusChanged {
                 depth,
                 position: Some(position),
+            });
+        }
+    }
+
+    pub fn extend_selection(&self, direction: i32) {
+        let extended = self.state.borrow_mut().extend_selection(direction);
+        if let Some((depth, focused, positions)) = extended {
+            self.emit(BrowserEvent::SelectionSetChanged {
+                depth,
+                positions,
+                focused,
             });
         }
     }
@@ -543,11 +570,19 @@ impl Browser {
             .borrow_mut()
             .apply_directory_change(depth, watched, change);
         if let Some((splices, selected)) = application {
+            let positions = self.state.borrow().selected_positions(depth);
             self.emit(BrowserEvent::EntriesSpliced {
                 depth,
                 splices,
                 selected,
             });
+            if let Some(focused) = selected {
+                self.emit(BrowserEvent::SelectionSetChanged {
+                    depth,
+                    positions,
+                    focused,
+                });
+            }
         }
     }
 
@@ -567,10 +602,15 @@ impl Browser {
                         "directory batch accepted"
                     );
                     let selected = state.columns[depth].selected;
+                    let positions = state.selected_positions(depth);
                     drop(state);
                     self.emit(BrowserEvent::EntriesInserted { depth, insertions });
-                    if let Some(position) = selected {
-                        self.emit(BrowserEvent::SelectionChanged { depth, position });
+                    if let Some(focused) = selected {
+                        self.emit(BrowserEvent::SelectionSetChanged {
+                            depth,
+                            positions,
+                            focused,
+                        });
                     }
                 } else if state.apply_peek_batch(request_id, &entries) {
                     drop(state);

@@ -44,9 +44,10 @@ struct ColumnView {
     filtered_model: gtk::FilterListModel,
     filter_entry: gtk::Entry,
     filter_button: gtk::ToggleButton,
-    selection: gtk::SingleSelection,
+    selection: gtk::MultiSelection,
     syncing_selection: Rc<Cell<bool>>,
     list: gtk::ListView,
+    marquee: gtk::Box,
     bound_rows: Rc<RefCell<Vec<BoundRow>>>,
     entry_count: Rc<Cell<usize>>,
     spinner: gtk::Spinner,
@@ -662,15 +663,23 @@ impl ViewState {
                 }
             }
             BrowserEvent::PeekClosed => self.close_peek_visual(),
-            BrowserEvent::SelectionChanged { depth, position } => {
+            BrowserEvent::SelectionSetChanged {
+                depth,
+                positions,
+                focused,
+            } => {
                 if let Some(column) = self.columns.borrow().get(depth) {
-                    if let Some(filtered_position) = filtered_position_for_source(column, position)
-                    {
-                        set_column_selection(column, filtered_position);
+                    let filtered_positions: Vec<_> = positions
+                        .into_iter()
+                        .filter_map(|position| filtered_position_for_source(column, position))
+                        .collect();
+                    set_column_selections(column, &filtered_positions);
+                    if let Some(focused) = filtered_position_for_source(column, focused) {
                         column
                             .list
-                            .scroll_to(filtered_position, gtk::ListScrollFlags::NONE, None);
+                            .scroll_to(focused, gtk::ListScrollFlags::FOCUS, None);
                     }
+                    column.list.grab_focus();
                 }
             }
             BrowserEvent::FocusChanged { depth, position } => {
@@ -804,26 +813,52 @@ impl ViewState {
                     .contains(query.as_str())
         });
         let filtered_model = gtk::FilterListModel::new(Some(model.clone()), Some(filter.clone()));
-        let selection = gtk::SingleSelection::new(Some(filtered_model.clone()));
-        selection.set_autoselect(false);
+        let selection = gtk::MultiSelection::new(Some(filtered_model.clone()));
         let syncing_selection = Rc::new(Cell::new(false));
+        let modified_selection = Rc::new(Cell::new(false));
+        let focused_filtered = Rc::new(Cell::new(None::<u32>));
         let weak_browser = Rc::downgrade(&self.browser);
         let source_for_selection = model.clone();
         let filtered_for_selection = filtered_model.clone();
         let syncing_selection_changed = syncing_selection.clone();
-        selection.connect_selected_notify(move |selection| {
+        let focused_filtered_changed = focused_filtered.clone();
+        selection.connect_selection_changed(move |selection, position, count| {
             if syncing_selection_changed.get() {
                 return;
             }
-            let source_position = source_position_for_filtered(
-                &source_for_selection,
-                &filtered_for_selection,
-                selection.selected(),
-            );
-            if let (Some(browser), Some(source_position)) =
-                (weak_browser.upgrade(), source_position)
-            {
-                browser.preview(depth, source_position);
+            let filtered_positions = bitset_positions(&selection.selection());
+            let source_positions: Vec<_> = filtered_positions
+                .iter()
+                .filter_map(|position| {
+                    source_position_for_filtered(
+                        &source_for_selection,
+                        &filtered_for_selection,
+                        *position,
+                    )
+                })
+                .collect();
+            let changed_end = position.saturating_add(count);
+            let focused = filtered_positions
+                .iter()
+                .rev()
+                .copied()
+                .find(|candidate| *candidate >= position && *candidate < changed_end)
+                .or_else(|| {
+                    focused_filtered_changed
+                        .get()
+                        .filter(|candidate| filtered_positions.contains(candidate))
+                })
+                .or_else(|| filtered_positions.last().copied());
+            focused_filtered_changed.set(focused);
+            let focused_source = focused.and_then(|position| {
+                source_position_for_filtered(
+                    &source_for_selection,
+                    &filtered_for_selection,
+                    position,
+                )
+            });
+            if let Some(browser) = weak_browser.upgrade() {
+                browser.set_selection(depth, &source_positions, focused_source);
             }
         });
         filter_entry.connect_changed(move |entry| {
@@ -835,8 +870,12 @@ impl ViewState {
         let bound_rows: Rc<RefCell<Vec<BoundRow>>> = Rc::new(RefCell::new(Vec::new()));
         let rows_for_setup = bound_rows.clone();
         let weak_state = Rc::downgrade(self);
+        let modified_selection_for_rows = modified_selection.clone();
+        let selection_for_rows = selection.clone();
+        let mouse_selection_anchor = Rc::new(Cell::new(None::<u32>));
         let source_for_hover = model.clone();
         let filtered_for_hover = filtered_model.clone();
+        let mouse_selection_anchor_for_background = mouse_selection_anchor.clone();
         factory.connect_setup(move |_, item| {
             let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
                 return;
@@ -893,6 +932,57 @@ impl ViewState {
                 }
             });
             row.add_controller(motion);
+            let selection_click = gtk::GestureClick::new();
+            selection_click.set_button(1);
+            selection_click.set_propagation_phase(gtk::PropagationPhase::Capture);
+            let clicked_item = item.clone();
+            let selection_for_click = selection_for_rows.clone();
+            let selection_anchor_for_click = mouse_selection_anchor.clone();
+            let modified_for_click = modified_selection_for_rows.clone();
+            let weak_state_for_click = weak_state.clone();
+            let source_for_click = source_for_hover.clone();
+            let filtered_for_click = filtered_for_hover.clone();
+            selection_click.connect_pressed(move |gesture, press_count, _, _| {
+                gesture.set_state(gtk::EventSequenceState::Claimed);
+                let position = clicked_item.position();
+                if position == gtk::INVALID_LIST_POSITION {
+                    return;
+                }
+                let modifiers = gesture.current_event_state();
+                let control = modifiers.contains(gtk::gdk::ModifierType::CONTROL_MASK);
+                let shift = modifiers.contains(gtk::gdk::ModifierType::SHIFT_MASK);
+                modified_for_click.set(control || shift);
+                if shift {
+                    let anchor = selection_anchor_for_click.get().unwrap_or(position);
+                    let start = anchor.min(position);
+                    let count = anchor.max(position).saturating_sub(start) + 1;
+                    selection_for_click.select_range(start, count, true);
+                } else if control {
+                    selection_anchor_for_click.set(Some(position));
+                    if selection_for_click.is_selected(position) {
+                        selection_for_click.unselect_item(position);
+                    } else {
+                        selection_for_click.select_item(position, false);
+                    }
+                } else {
+                    selection_anchor_for_click.set(Some(position));
+                    selection_for_click.select_item(position, true);
+                }
+                modified_for_click.set(false);
+
+                let source_position =
+                    source_position_for_filtered(&source_for_click, &filtered_for_click, position);
+                if let (Some(state), Some(source_position)) =
+                    (weak_state_for_click.upgrade(), source_position)
+                {
+                    if press_count == 2 {
+                        state.browser.activate(depth, source_position);
+                    } else if !control && !shift {
+                        state.browser.preview(depth, source_position);
+                    }
+                }
+            });
+            row.add_controller(selection_click);
             item.set_child(Some(&row));
             let weak_item = glib::WeakRef::new();
             weak_item.set(Some(item));
@@ -963,8 +1053,155 @@ impl ViewState {
 
         let list = gtk::ListView::new(Some(selection.clone()), Some(factory));
         list.add_css_class("file-list");
+        list.set_enable_rubberband(false);
         list.set_single_click_activate(false);
         list.set_vexpand(true);
+
+        let marquee_box = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        marquee_box.add_css_class("file-marquee");
+        marquee_box.set_can_target(false);
+        marquee_box.set_halign(gtk::Align::Start);
+        marquee_box.set_valign(gtk::Align::Start);
+        marquee_box.set_visible(false);
+        self.overlay.add_overlay(&marquee_box);
+
+        let marquee_active = Rc::new(Cell::new(false));
+        let marquee_origin = Rc::new(Cell::new((0.0, 0.0)));
+        let marquee_initial = Rc::new(RefCell::new(gtk::Bitset::new_empty()));
+        let marquee_modifiers = Rc::new(Cell::new((false, false)));
+        let marquee = gtk::GestureDrag::new();
+        marquee.set_button(1);
+        marquee.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let active_for_begin = marquee_active.clone();
+        let origin_for_begin = marquee_origin.clone();
+        let initial_for_begin = marquee_initial.clone();
+        let modifiers_for_begin = marquee_modifiers.clone();
+        let selection_for_begin = selection.clone();
+        let marquee_box_for_begin = marquee_box.clone();
+        marquee.connect_drag_begin(move |gesture, x, y| {
+            let starts_on_row = gesture
+                .widget()
+                .and_then(|widget| widget.pick(x, y, gtk::PickFlags::DEFAULT))
+                .is_some_and(is_file_row_target);
+            active_for_begin.set(!starts_on_row);
+            if starts_on_row {
+                return;
+            }
+            gesture.set_state(gtk::EventSequenceState::Claimed);
+            marquee_box_for_begin.set_visible(true);
+            origin_for_begin.set((x, y));
+            initial_for_begin.replace(selection_for_begin.selection().copy());
+            let modifiers = gesture.current_event_state();
+            modifiers_for_begin.set((
+                modifiers.contains(gtk::gdk::ModifierType::CONTROL_MASK),
+                modifiers.contains(gtk::gdk::ModifierType::SHIFT_MASK),
+            ));
+        });
+        let active_for_update = marquee_active.clone();
+        let origin_for_update = marquee_origin.clone();
+        let initial_for_update = marquee_initial.clone();
+        let modifiers_for_update = marquee_modifiers.clone();
+        let selection_for_marquee = selection.clone();
+        let rows_for_marquee = bound_rows.clone();
+        let list_for_marquee = list.clone();
+        let overlay_for_marquee = self.overlay.clone();
+        let marquee_box_for_update = marquee_box.clone();
+        marquee.connect_drag_update(move |_, offset_x, offset_y| {
+            if !active_for_update.get() {
+                return;
+            }
+            let (origin_x, origin_y) = origin_for_update.get();
+            let current_x = origin_x + offset_x;
+            let current_y = origin_y + offset_y;
+            let left = origin_x.min(current_x);
+            let right = origin_x.max(current_x);
+            let top = origin_y.min(current_y);
+            let bottom = origin_y.max(current_y);
+            if let Some(list_bounds) = list_for_marquee.compute_bounds(&overlay_for_marquee) {
+                marquee_box_for_update
+                    .set_margin_start((f64::from(list_bounds.x()) + left).round().max(0.0) as i32);
+                marquee_box_for_update
+                    .set_margin_top((f64::from(list_bounds.y()) + top).round().max(0.0) as i32);
+                marquee_box_for_update.set_size_request(
+                    (right - left).round().max(1.0) as i32,
+                    (bottom - top).round().max(1.0) as i32,
+                );
+            }
+            let initial = initial_for_update.borrow();
+            let (control, shift) = modifiers_for_update.get();
+            let selected = if control || shift {
+                initial.copy()
+            } else {
+                gtk::Bitset::new_empty()
+            };
+            rows_for_marquee.borrow_mut().retain(|bound| {
+                let (Some(item), Some(row)) = (bound.item.upgrade(), bound.row.upgrade()) else {
+                    return false;
+                };
+                let Some(bounds) = row.compute_bounds(&list_for_marquee) else {
+                    return true;
+                };
+                let intersects = f64::from(bounds.x()) < right
+                    && f64::from(bounds.x() + bounds.width()) > left
+                    && f64::from(bounds.y()) < bottom
+                    && f64::from(bounds.y() + bounds.height()) > top;
+                let position = item.position();
+                if intersects && position != gtk::INVALID_LIST_POSITION {
+                    if control && initial.contains(position) {
+                        selected.remove(position);
+                    } else {
+                        selected.add(position);
+                    }
+                }
+                true
+            });
+            let mask = gtk::Bitset::new_range(0, selection_for_marquee.n_items());
+            selection_for_marquee.set_selection(&selected, &mask);
+        });
+        let active_for_end = marquee_active.clone();
+        let marquee_box_for_end = marquee_box.clone();
+        marquee.connect_drag_end(move |_, _, _| {
+            active_for_end.set(false);
+            marquee_box_for_end.set_visible(false);
+        });
+        list.add_controller(marquee);
+
+        let clear_selection = gtk::GestureClick::new();
+        clear_selection.set_button(1);
+        let background_press = Rc::new(Cell::new((0.0, 0.0)));
+        let background_press_start = background_press.clone();
+        clear_selection.connect_pressed(move |_, _, x, y| background_press_start.set((x, y)));
+        let selection_for_background = selection.clone();
+        clear_selection.connect_released(move |gesture, _, x, y| {
+            let (start_x, start_y) = background_press.get();
+            if (x - start_x).abs() > 3.0 || (y - start_y).abs() > 3.0 {
+                return;
+            }
+            let clicked_row = gesture
+                .widget()
+                .and_then(|widget| widget.pick(x, y, gtk::PickFlags::DEFAULT))
+                .is_some_and(is_file_row_target);
+            if !clicked_row {
+                selection_for_background.unselect_all();
+                mouse_selection_anchor_for_background.set(None);
+            }
+        });
+        list.add_controller(clear_selection);
+        let selection_keys = gtk::EventControllerKey::new();
+        selection_keys.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let modified_for_key = modified_selection.clone();
+        selection_keys.connect_key_pressed(move |_, _, _, modifiers| {
+            modified_for_key.set(
+                modifiers.contains(gtk::gdk::ModifierType::CONTROL_MASK)
+                    || modifiers.contains(gtk::gdk::ModifierType::SHIFT_MASK),
+            );
+            glib::Propagation::Proceed
+        });
+        let modified_for_key = modified_selection.clone();
+        selection_keys.connect_key_released(move |_, _, _, _| {
+            modified_for_key.set(false);
+        });
+        list.add_controller(selection_keys);
 
         let weak_browser = Rc::downgrade(&self.browser);
         let source_for_activation = model.clone();
@@ -1021,6 +1258,7 @@ impl ViewState {
             selection,
             syncing_selection,
             list,
+            marquee: marquee_box,
             bound_rows,
             entry_count,
             spinner,
@@ -1250,6 +1488,7 @@ impl ViewState {
                 .animation_generation
                 .set(column.animation_generation.get().saturating_add(1));
             self.columns_widget.remove(&column.shell);
+            self.overlay.remove_overlay(&column.marquee);
         }
         let retained = self
             .columns
@@ -1361,8 +1600,27 @@ fn source_position_for_filtered(
 
 fn set_column_selection(column: &ColumnView, position: u32) {
     column.syncing_selection.set(true);
-    column.selection.set_selected(position);
+    column.selection.unselect_all();
+    if position != gtk::INVALID_LIST_POSITION {
+        column.selection.select_item(position, true);
+    }
     column.syncing_selection.set(false);
+}
+
+fn set_column_selections(column: &ColumnView, positions: &[u32]) {
+    column.syncing_selection.set(true);
+    column.selection.unselect_all();
+    for position in positions {
+        column.selection.select_item(*position, false);
+    }
+    column.syncing_selection.set(false);
+}
+
+fn bitset_positions(bitset: &gtk::Bitset) -> Vec<u32> {
+    let Some((iterator, first)) = gtk::BitsetIter::init_first(bitset) else {
+        return Vec::new();
+    };
+    std::iter::once(first).chain(iterator).collect()
 }
 
 fn filtered_position_for_source(column: &ColumnView, source_position: usize) -> Option<u32> {
@@ -1477,6 +1735,21 @@ fn column_menu_option(label: &str, selected: bool) -> (gtk::Button, gtk::Image) 
     option.add_css_class("column-menu-option");
     option.set_has_frame(false);
     (option, check)
+}
+
+fn is_file_row_target(mut target: gtk::Widget) -> bool {
+    loop {
+        if target.has_css_class("file-row") {
+            return true;
+        }
+        if target.is::<gtk::ListView>() {
+            return false;
+        }
+        let Some(parent) = target.parent() else {
+            return false;
+        };
+        target = parent;
+    }
 }
 
 fn is_breadcrumb_target(mut target: gtk::Widget) -> bool {

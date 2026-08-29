@@ -697,8 +697,16 @@ menubutton.column-header-action > button:checked image {
 }
 
 .file-list row:selected {
-  background: alpha(@theme_muted, 0.65);
+  background: @theme_highlight;
   color: @theme_text;
+  outline: 1px solid alpha(@theme_accent, 0.7);
+  outline-offset: -1px;
+}
+
+.file-marquee {
+  background: alpha(@theme_highlight, 0.58);
+  border: 1px solid @theme_accent;
+  border-radius: 4px;
 }
 
 .file-list .file-row.active-path {

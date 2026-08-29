@@ -114,7 +114,7 @@ The preview pane should support:
 - Common image formats
 - Plain text and source code
 - Markdown
-- PDF first-page previews
+- Native continuous multi-page PDF previews with zoom and panning
 - Audio and video metadata and thumbnails
 - Directory summaries
 - Generic metadata fallback

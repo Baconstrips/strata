@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use std::cmp::Ordering;
+use std::{cmp::Ordering, collections::HashSet};
 
 use crate::{
     app::peek::PeekState,
@@ -34,6 +34,8 @@ pub struct ColumnState {
     pub location: Location,
     pub entries: Vec<FileEntry>,
     pub selected: Option<usize>,
+    selected_locations: HashSet<Location>,
+    selection_anchor: Option<Location>,
     selection_target: Option<Location>,
     pub load_state: LoadState,
     preferences: ViewPreferences,
@@ -137,6 +139,8 @@ impl NavigationState {
                 location,
                 entries: Vec::new(),
                 selected: None,
+                selected_locations: HashSet::new(),
+                selection_anchor: None,
                 selection_target: None,
                 load_state: LoadState::Loading,
                 preferences,
@@ -201,6 +205,8 @@ impl NavigationState {
             location,
             entries: Vec::new(),
             selected: None,
+            selected_locations: HashSet::new(),
+            selection_anchor: None,
             selection_target: None,
             load_state: LoadState::Loading,
             preferences: self.preferences,
@@ -267,11 +273,15 @@ impl NavigationState {
                 insert_monitored_entry(&mut column.entries, entry, preferences, &mut splices);
             }
             DirectoryChange::Remove(location) => {
+                column.selected_locations.remove(&location);
                 remove_monitored_entry(&mut column.entries, &location, &mut splices);
             }
             DirectoryChange::Move { from, entry } => {
                 if selected_location.as_ref() == Some(&from) {
                     selected_location = Some(entry.location.clone());
+                }
+                if column.selected_locations.remove(&from) {
+                    column.selected_locations.insert(entry.location.clone());
                 }
                 remove_monitored_entry(&mut column.entries, &from, &mut splices);
                 if entry.location != from {
@@ -290,6 +300,12 @@ impl NavigationState {
                 .entries
                 .iter()
                 .position(|entry| entry.location == location)
+        });
+        column.selected_locations.retain(|location| {
+            column
+                .entries
+                .iter()
+                .any(|entry| &entry.location == location)
         });
         column.load_state = if column.entries.is_empty() {
             LoadState::Empty
@@ -327,7 +343,7 @@ impl NavigationState {
         &mut self,
         depth: usize,
         preferences: ViewPreferences,
-    ) -> Option<(Vec<FileEntry>, Option<usize>)> {
+    ) -> Option<(Vec<FileEntry>, Option<usize>, Vec<usize>)> {
         let column = self.columns.get_mut(depth)?;
         let selected_location = column
             .selected
@@ -343,7 +359,18 @@ impl NavigationState {
                 .iter()
                 .position(|entry| entry.location == location)
         });
-        Some((column.entries.clone(), column.selected))
+        let selected_positions = column
+            .entries
+            .iter()
+            .enumerate()
+            .filter_map(|(position, entry)| {
+                column
+                    .selected_locations
+                    .contains(&entry.location)
+                    .then_some(position)
+            })
+            .collect();
+        Some((column.entries.clone(), column.selected, selected_positions))
     }
 
     pub fn active_focus(&self) -> Option<(usize, Option<usize>)> {
@@ -423,12 +450,119 @@ impl NavigationState {
         let Some(column) = self.columns.get_mut(depth) else {
             return false;
         };
-        if position >= column.entries.len() {
+        let Some(entry) = column.entries.get(position) else {
             return false;
-        }
+        };
         column.selected = Some(position);
+        column.selected_locations.clear();
+        column.selected_locations.insert(entry.location.clone());
+        column.selection_anchor = Some(entry.location.clone());
         self.active_column = Some(depth);
         true
+    }
+
+    pub fn set_selection(
+        &mut self,
+        depth: usize,
+        positions: &[usize],
+        focused: Option<usize>,
+    ) -> bool {
+        let Some(column) = self.columns.get_mut(depth) else {
+            return false;
+        };
+        if positions
+            .iter()
+            .any(|position| *position >= column.entries.len())
+            || focused.is_some_and(|position| position >= column.entries.len())
+        {
+            return false;
+        }
+        column.selected_locations = positions
+            .iter()
+            .map(|position| column.entries[*position].location.clone())
+            .collect();
+        column.selected = focused.filter(|position| positions.contains(position));
+        if column.selection_anchor.is_none() {
+            column.selection_anchor = column
+                .selected
+                .and_then(|position| column.entries.get(position))
+                .map(|entry| entry.location.clone());
+        }
+        self.active_column = Some(depth);
+        true
+    }
+
+    pub fn extend_selection(&mut self, direction: i32) -> Option<(usize, usize, Vec<usize>)> {
+        let depth = self
+            .active_column
+            .or_else(|| self.columns.len().checked_sub(1))?;
+        let column = self.columns.get_mut(depth)?;
+        if column.entries.is_empty() {
+            return None;
+        }
+        let last = column.entries.len() - 1;
+        let current = column
+            .selected
+            .unwrap_or(if direction < 0 { last } else { 0 });
+        let focused = if direction < 0 {
+            current.saturating_sub(1)
+        } else {
+            (current + 1).min(last)
+        };
+        let anchor = column
+            .selection_anchor
+            .as_ref()
+            .and_then(|location| {
+                column
+                    .entries
+                    .iter()
+                    .position(|entry| &entry.location == location)
+            })
+            .unwrap_or(current);
+        if column.selection_anchor.is_none() {
+            column.selection_anchor = Some(column.entries[anchor].location.clone());
+        }
+        let start = anchor.min(focused);
+        let end = anchor.max(focused);
+        column.selected_locations = column.entries[start..=end]
+            .iter()
+            .map(|entry| entry.location.clone())
+            .collect();
+        column.selected = Some(focused);
+        self.active_column = Some(depth);
+        Some((depth, focused, (start..=end).collect()))
+    }
+
+    pub fn selected_positions(&self, depth: usize) -> Vec<usize> {
+        let Some(column) = self.columns.get(depth) else {
+            return Vec::new();
+        };
+        column
+            .entries
+            .iter()
+            .enumerate()
+            .filter_map(|(position, entry)| {
+                column
+                    .selected_locations
+                    .contains(&entry.location)
+                    .then_some(position)
+            })
+            .collect()
+    }
+
+    pub fn selected_entries(&self) -> Vec<FileEntry> {
+        let Some(depth) = self.active_column else {
+            return Vec::new();
+        };
+        let Some(column) = self.columns.get(depth) else {
+            return Vec::new();
+        };
+        column
+            .entries
+            .iter()
+            .filter(|entry| column.selected_locations.contains(&entry.location))
+            .cloned()
+            .collect()
     }
 
     pub fn move_selection(&mut self, direction: i32) -> Option<(usize, usize)> {
@@ -449,6 +583,11 @@ impl NavigationState {
             (Some(position), std::cmp::Ordering::Equal) => position,
         };
         column.selected = Some(position);
+        column.selected_locations.clear();
+        column
+            .selected_locations
+            .insert(column.entries[position].location.clone());
+        column.selection_anchor = Some(column.entries[position].location.clone());
         self.active_column = Some(depth);
         Some((depth, position))
     }

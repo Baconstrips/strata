@@ -47,12 +47,12 @@ Legend: **P0** blocks the milestone, **P1** is required for its exit criteria, *
 
 - [x] Capture the prototype's layout, motion, typography, and interaction baseline
 - [x] Audit and record licenses for the bundled JetBrains Mono font and Lucide icon subset
-- [ ] **P0** Replace widget-specific colors with semantic theme tokens
+- [x] **P0** Replace widget-specific colors with semantic theme tokens
 - [ ] **P1** Define typography, spacing, radius, density, and animation tokens
 - [x] Bundle JetBrains Mono as the default visual profile with a system fallback
 - [ ] **P1** Define separate interface and monospace preview font settings
 - [x] Establish semantic icon names backed by a curated, namespaced Lucide subset
-- [ ] **P1** Add reduced-motion token and safe fallback values
+- [x] **P1** Add reduced-motion token and safe fallback values
 
 ## M1 — Navigation core
 
@@ -96,7 +96,9 @@ Legend: **P0** blocks the milestone, **P1** is required for its exit criteria, *
 - [x] **P0** Define focus transfer between columns and location entry
 - [ ] **P0** Define focus transfer for sidebar, search, and preview
 - [x] **P1** Visible distinction between focus and selection
-- [ ] **P1** Multi-selection model and modifier behavior
+- [x] **P1** Multi-selection model with an anchor, focused item, and stable selection across updates
+- [x] **P1** Mouse multi-selection with marquee/rubber-band selection, `Ctrl+Click` toggle, and `Shift+Click` ranges
+- [x] **P1** Keyboard multi-selection with `Shift+Up/Down` range extension and `Ctrl+A`
 - [ ] **P1** Shortcut reference overlay
 
 ### Directory behavior
@@ -123,15 +125,25 @@ Legend: **P0** blocks the milestone, **P1** is required for its exit criteria, *
 
 ### Opening and creation
 
-- [ ] **P0** Open and Open With
+- [x] **P0** Open files with the default application
+- [ ] **P0** Add an Open With chooser
 - [ ] **P0** Create folder (`Ctrl+Shift+N`) and empty file
-- [ ] **P0** Rename with validation and inline feedback (`F2`)
+- [ ] **P0** Replace the selected row label with an inline rename input on `F2`, preserving the extension selection and showing validation feedback in place
 - [ ] **P1** Executable-file policy and confirmation
+
+### Context menu (revisit after core actions exist)
+
+- [ ] **P1** Open a selection-aware file context menu from right-click and the keyboard menu key
+- [ ] **P1** Preserve an existing multi-selection when right-clicking one of its selected rows; otherwise select the clicked row
+- [ ] **P1** Group Open/Open With, Cut/Copy, Move To/Copy To, Rename, Trash/Delete, and Properties with visible shortcuts and separators
+- [ ] **P1** Disable or hide actions according to selection shape, destination writability, clipboard state, and provider capability
+- [ ] **P2** Evaluate optional Compress, Email, LocalSend, and desktop share integrations without making them core dependencies
 
 ### Operation engine
 
 - [ ] **P0** Model queued operation lifecycle and final outcomes
-- [ ] **P0** Copy, move, duplicate, trash, and permanent delete
+- [ ] **P0** Copy and move selected files between folders through the operation engine
+- [ ] **P0** Duplicate, trash, and permanently delete selected files
 - [ ] **P0** Bind `Delete` to a confirmed delete/trash action
 - [ ] **P0** Progress reporting and cancellation
 - [ ] **P0** Conflict handling: skip, replace, rename, and apply-to-all
@@ -144,9 +156,12 @@ Legend: **P0** blocks the milestone, **P1** is required for its exit criteria, *
 
 ### Desktop interoperability
 
-- [ ] **P0** Copy/cut/paste with interoperable file-manager clipboard formats
+- [ ] **P0** Copy/cut selected files with `Ctrl+C` / `Ctrl+X` and paste into another folder with `Ctrl+V`
+- [ ] **P0** Use interoperable file-manager clipboard formats for external copy/cut/paste
+- [ ] **P0** Enable Cut/Copy based on selection and Paste based on clipboard contents and destination writability
 - [ ] **P0** Drag and drop between locations within Strata
-- [ ] **P0** Drag files from Strata to external applications and desktop targets using interoperable formats
+- [ ] **P0** Export selected files as GTK/GDK file-list and `text/uri-list` drag data for browsers, editors, desktop targets, and other external applications
+- [ ] **P1** Test outbound file dragging across native Wayland applications, XWayland applications, and browser upload targets
 - [ ] **P1** Removable media mount, unmount, and disconnect states
 - [ ] **P1** Notifications for completed long-running operations
 
@@ -154,7 +169,7 @@ Legend: **P0** blocks the milestone, **P1** is required for its exit criteria, *
 
 ### Search
 
-- [ ] **P0** Instant current-directory filtering
+- [x] **P0** Instant current-directory filtering
 - [ ] **P0** Streaming recursive filename search
 - [ ] **P0** Query cancellation and stale-result rejection
 - [ ] **P0** Search result path context and reveal-in-columns action
@@ -166,7 +181,8 @@ Legend: **P0** blocks the milestone, **P1** is required for its exit criteria, *
 ### Preview framework
 
 - [ ] **P0** Add MIME-aware preview registry with provider priorities
-- [ ] **P0** Enforce byte, time, pixel, and concurrency budgets
+- [x] **P0** Enforce bounded text reads and PDF pixel budgets
+- [ ] **P0** Enforce preview time and concurrency budgets
 - [x] **P0** Cancel previews when selection changes
 - [x] **P0** Generic metadata and unsupported fallback
 - [ ] **P1** Freedesktop-compatible thumbnail cache
@@ -177,17 +193,19 @@ Legend: **P0** blocks the milestone, **P1** is required for its exit criteria, *
 - [x] **P0** Common image formats
 - [x] **P0** Bounded plain text and source preview
 - [ ] **P1** Markdown rendering
-- [x] **P1** PDF first page
+- [x] **P1** Native, virtualized, continuous multi-page PDF viewer
+- [x] **P1** PDF zoom, fit-width reset, and pointer panning
 - [ ] **P1** Audio metadata and artwork
 - [ ] **P1** Video metadata and thumbnail
 - [ ] **P1** Directory summary
-- [ ] **P2** Syntax highlighting with configurable monospace font
+- [x] **P2** Source syntax highlighting and line numbers
+- [ ] **P2** Configurable monospace preview font
 
 ## M4 — Presentation and customization
 
 ### Views
 
-- [ ] **P0** Production list mode
+- [x] **P0** Production virtualized list mode
 - [ ] **P0** Virtualized grid mode
 - [ ] **P0** Compact and airy density presets
 - [ ] **P1** Configurable icon/thumbnail size
@@ -196,19 +214,20 @@ Legend: **P0** blocks the milestone, **P1** is required for its exit criteria, *
 
 ### Theme system
 
-- [ ] **P0** Validate semantic theme schema and fallback cascade
-- [ ] **P0** Load current Omarchy theme and watch for live changes
+- [x] **P0** Validate semantic theme schema and fallback cascade
+- [x] **P0** Load current Omarchy theme and watch for live changes
 - [ ] **P0** Add generic system light/dark source
-- [ ] **P1** Load user themes from XDG configuration directories
+- [x] **P1** Load user themes from XDG configuration directories
 - [ ] **P1** Apply interface and monospace font overrides live
-- [ ] **P1** Document theme format with a complete example
+- [x] **P1** Document theme format with a complete example
 - [ ] **P1** Test missing, malformed, light, and low-contrast themes
 
 ### Settings and keybindings
 
 - [ ] **P0** Add versioned settings schema and XDG persistence
 - [ ] **P0** Centralize defaults and tolerate unknown settings
-- [ ] **P1** Preferences UI
+- [x] **P1** Preferences UI
+- [ ] **P1** Persist all preferences through the versioned settings schema
 - [ ] **P1** Configurable keybindings and conflict detection
 - [x] **P1** Reduced-motion preference that disables nonessential animations
 - [ ] **P1** Import/export settings

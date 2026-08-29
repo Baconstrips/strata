@@ -250,6 +250,7 @@ fn install_keyboard_navigation(
         };
         let alt = modifiers.contains(gtk::gdk::ModifierType::ALT_MASK);
         let control = modifiers.contains(gtk::gdk::ModifierType::CONTROL_MASK);
+        let shift = modifiers.contains(gtk::gdk::ModifierType::SHIFT_MASK);
         if key == gtk::gdk::Key::Escape && view.dismiss_focused_filter() {
             return glib::Propagation::Stop;
         }
@@ -278,6 +279,14 @@ fn install_keyboard_navigation(
         }
         if key == gtk::gdk::Key::Escape && preview.is_open() {
             preview.close();
+            return glib::Propagation::Stop;
+        }
+        if shift && key == gtk::gdk::Key::Up {
+            browser.extend_selection(-1);
+            return glib::Propagation::Stop;
+        }
+        if shift && key == gtk::gdk::Key::Down {
+            browser.extend_selection(1);
             return glib::Propagation::Stop;
         }
 

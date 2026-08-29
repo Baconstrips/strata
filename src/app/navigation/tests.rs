@@ -28,6 +28,73 @@ fn named_entry(path: &str, name: &str) -> FileEntry {
 }
 
 #[test]
+fn multi_selection_tracks_entries_and_replaces_cleanly() {
+    let mut state = NavigationState::default();
+    state.navigate(location("/fixture"), RequestId(1));
+    state.apply_batch(
+        RequestId(1),
+        vec![
+            named_entry("/fixture/alpha", "alpha"),
+            named_entry("/fixture/bravo", "bravo"),
+            named_entry("/fixture/charlie", "charlie"),
+        ],
+    );
+
+    assert!(state.set_selection(0, &[0, 2], Some(2)));
+    assert_eq!(
+        state
+            .selected_entries()
+            .iter()
+            .map(|entry| entry.display_name.as_str())
+            .collect::<Vec<_>>(),
+        ["alpha", "charlie"]
+    );
+    assert_eq!(
+        state.focused_entry().map(|(_, position, _)| position),
+        Some(2)
+    );
+
+    assert!(state.select(0, 1));
+    assert_eq!(
+        state
+            .selected_entries()
+            .iter()
+            .map(|entry| entry.display_name.as_str())
+            .collect::<Vec<_>>(),
+        ["bravo"]
+    );
+}
+
+#[test]
+fn keyboard_range_selection_extends_and_contracts_from_its_anchor() {
+    let mut state = NavigationState::default();
+    state.navigate(location("/fixture"), RequestId(1));
+    state.apply_batch(
+        RequestId(1),
+        vec![
+            named_entry("/fixture/alpha", "alpha"),
+            named_entry("/fixture/bravo", "bravo"),
+            named_entry("/fixture/charlie", "charlie"),
+        ],
+    );
+    assert!(state.select(0, 0));
+
+    assert_eq!(
+        state.extend_selection(1).map(|(_, _, range)| range),
+        Some(vec![0, 1])
+    );
+    assert_eq!(
+        state.extend_selection(1).map(|(_, _, range)| range),
+        Some(vec![0, 1, 2])
+    );
+    assert_eq!(
+        state.extend_selection(-1).map(|(_, _, range)| range),
+        Some(vec![0, 1])
+    );
+    assert_eq!(state.selected_entries().len(), 2);
+}
+
+#[test]
 fn active_path_is_independent_from_the_parent_highlight() {
     let mut state = NavigationState::default();
     state.navigate(location("/fixture"), RequestId(1));
