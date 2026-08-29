@@ -29,7 +29,7 @@ Legend: **P0** blocks the milestone, **P1** is required for its exit criteria, *
 
 - [x] **P0** Introduce native-path-safe `Location` and `FileEntry` models
 - [x] **P0** Model committed `NavigationPath` separately from temporary `PeekState`
-- [ ] **P0** Add explicit active-column, focus, and selection state
+- [x] **P0** Add explicit active-column, focus, and selection state
 - [x] **P0** Add navigation commands and reducer/controller tests
 - [x] **P1** Add typed loading, empty, unavailable, and error states
 - [x] **P1** Define metadata states so unknown is not confused with zero/empty
@@ -62,7 +62,7 @@ Legend: **P0** blocks the milestone, **P1** is required for its exit criteria, *
 - [x] **P0** Replace deeper columns when a sibling path is committed
 - [x] **P0** Allow committed columns to stack without a fixed depth limit
 - [x] **P0** Keep the newest active column visible by scrolling to the end during horizontal overflow
-- [ ] **P0** Preserve selection per committed column
+- [x] **P0** Preserve selection per committed column
 - [ ] **P1** Make entry/exit animations interruptible
 - [ ] **P1** Add loading skeleton and directory error state
 - [x] **P1** Cancel enumeration when a column is removed
@@ -83,15 +83,15 @@ Legend: **P0** blocks the milestone, **P1** is required for its exit criteria, *
 - [x] **P0** Back, forward, parent, and home commands
 - [ ] **P0** Editable location entry with validation and error feedback
 - [ ] **P1** Breadcrumb/path display
-- [ ] **P1** Reveal and focus the active location after navigation
+- [x] **P1** Reveal and focus the active location after navigation
 - [ ] **P1** Handle symlinks and inaccessible destinations deliberately
 
 ### Keyboard and selection
 
-- [ ] **P0** Arrow and `h/j/k/l` navigation
+- [x] **P0** Arrow and `h/j/k/l` navigation
 - [ ] **P0** Enter/open, Escape/cancel, and Space/preview actions
 - [ ] **P0** Define focus transfer between sidebar, columns, location, search, and preview
-- [ ] **P1** Visible distinction between focus and selection
+- [x] **P1** Visible distinction between focus and selection
 - [ ] **P1** Multi-selection model and modifier behavior
 - [ ] **P1** Shortcut reference overlay
 

@@ -80,11 +80,46 @@ pub fn present(application: &gtk::Application) {
     root.append(&content);
 
     window.set_child(Some(&root));
+    install_keyboard_navigation(&window, &controller);
     browser.navigate(home_directory());
 
     let browser_controller = browser.browser();
     window.connect_destroy(move |_| browser_controller.clear_observer());
     window.present();
+}
+
+fn install_keyboard_navigation(window: &gtk::ApplicationWindow, browser: &Rc<Browser>) {
+    let keys = gtk::EventControllerKey::new();
+    keys.set_propagation_phase(gtk::PropagationPhase::Capture);
+    let weak_browser = Rc::downgrade(browser);
+    keys.connect_key_pressed(move |_, key, _, modifiers| {
+        let Some(browser) = weak_browser.upgrade() else {
+            return glib::Propagation::Proceed;
+        };
+        let alt = modifiers.contains(gtk::gdk::ModifierType::ALT_MASK);
+
+        match (key, alt) {
+            (gtk::gdk::Key::Left, true) => browser.back(),
+            (gtk::gdk::Key::Right, true) => browser.forward(),
+            (gtk::gdk::Key::Home, true) => {
+                browser.navigate(Location::local(home_directory()));
+            }
+            (gtk::gdk::Key::j | gtk::gdk::Key::Down, false) => browser.move_selection(1),
+            (gtk::gdk::Key::k | gtk::gdk::Key::Up, false) => browser.move_selection(-1),
+            (gtk::gdk::Key::h | gtk::gdk::Key::Left, false) => browser.focus_parent(),
+            (
+                gtk::gdk::Key::l
+                | gtk::gdk::Key::Right
+                | gtk::gdk::Key::Return
+                | gtk::gdk::Key::KP_Enter,
+                false,
+            ) => browser.activate_focused(),
+            (gtk::gdk::Key::Escape, false) => browser.escape(),
+            _ => return glib::Propagation::Proceed,
+        }
+        glib::Propagation::Stop
+    });
+    window.add_controller(keys);
 }
 
 fn navigation_button(icon: &str, tooltip: &str) -> gtk::Button {

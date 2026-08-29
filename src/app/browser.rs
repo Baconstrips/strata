@@ -43,6 +43,13 @@ pub enum BrowserEvent {
         message: String,
     },
     PeekClosed,
+    FocusChanged {
+        depth: usize,
+        position: Option<usize>,
+    },
+    OpenRequested {
+        location: Location,
+    },
 }
 
 type Observer = Rc<dyn Fn(BrowserEvent)>;
@@ -88,6 +95,10 @@ impl Browser {
             depth: 0,
             location: location.clone(),
         });
+        self.emit(BrowserEvent::FocusChanged {
+            depth: 0,
+            position: None,
+        });
         self.start_load(location, request_id);
     }
 
@@ -108,6 +119,10 @@ impl Browser {
         self.emit(BrowserEvent::ColumnAdded {
             depth: retained,
             location: location.clone(),
+        });
+        self.emit(BrowserEvent::FocusChanged {
+            depth: retained,
+            position: None,
         });
         self.start_load(location, request_id);
     }
@@ -143,10 +158,26 @@ impl Browser {
         self.peek_load.replace(Some(handle));
     }
 
-    pub fn close_peek(&self) {
+    pub fn close_peek(&self) -> bool {
         self.peek_load.take();
-        if self.state.borrow_mut().clear_peek() {
+        let closed = self.state.borrow_mut().clear_peek();
+        if closed {
             self.emit(BrowserEvent::PeekClosed);
+        }
+        closed
+    }
+
+    pub fn escape(&self) {
+        if self.close_peek() {
+            return;
+        }
+
+        let closed = self.state.borrow_mut().close_deepest();
+        if let Some((depth, position)) = closed {
+            let len = depth + 1;
+            self.loads.borrow_mut().truncate(len);
+            self.emit(BrowserEvent::ColumnsTruncated { len });
+            self.emit(BrowserEvent::FocusChanged { depth, position });
         }
     }
 
@@ -180,7 +211,43 @@ impl Browser {
     }
 
     pub fn select(&self, depth: usize, position: usize) {
-        let _changed = self.state.borrow_mut().select(depth, position);
+        if self.state.borrow_mut().select(depth, position) {
+            self.emit(BrowserEvent::FocusChanged {
+                depth,
+                position: Some(position),
+            });
+        }
+    }
+
+    pub fn move_selection(&self, direction: i32) {
+        if let Some((depth, position)) = self.state.borrow_mut().move_selection(direction) {
+            self.emit(BrowserEvent::FocusChanged {
+                depth,
+                position: Some(position),
+            });
+        }
+    }
+
+    pub fn focus_parent(&self) {
+        if let Some((depth, position)) = self.state.borrow_mut().focus_parent() {
+            self.emit(BrowserEvent::FocusChanged { depth, position });
+        }
+    }
+
+    pub fn activate_focused(self: &Rc<Self>) {
+        let focused = self.state.borrow().focused_entry();
+        let Some((depth, _, entry)) = focused else {
+            self.move_selection(1);
+            return;
+        };
+
+        if entry.is_directory() {
+            self.descend(depth, entry.location);
+        } else {
+            self.emit(BrowserEvent::OpenRequested {
+                location: entry.location,
+            });
+        }
     }
 
     fn restore_path(self: &Rc<Self>, path: NavigationPath) {
@@ -200,12 +267,19 @@ impl Browser {
             .restore(path, loads.iter().map(|(_, request_id)| *request_id));
 
         self.emit(BrowserEvent::Reset);
+        let active_depth = loads.len().checked_sub(1);
         for (depth, (location, request_id)) in loads.into_iter().enumerate() {
             self.emit(BrowserEvent::ColumnAdded {
                 depth,
                 location: location.clone(),
             });
             self.start_load(location, request_id);
+        }
+        if let Some(depth) = active_depth {
+            self.emit(BrowserEvent::FocusChanged {
+                depth,
+                position: None,
+            });
         }
     }
 

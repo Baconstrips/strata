@@ -70,6 +70,16 @@ headerbar {
   background: #243d56;
 }
 
+.file-list:focus row:selected {
+  outline: 1px solid #22d3ee;
+  outline-offset: -1px;
+  box-shadow: 0 0 10px alpha(#22d3ee, 0.24);
+}
+
+.file-list:not(:focus) row:selected {
+  background: alpha(#243d56, 0.68);
+}
+
 .empty-state {
   color: #4d86b0;
   font-size: 1.1em;

@@ -13,6 +13,8 @@ use crate::{
 #[derive(Clone)]
 struct ColumnView {
     model: gtk::StringList,
+    selection: gtk::SingleSelection,
+    list: gtk::ListView,
     entries: Rc<RefCell<Vec<FileEntry>>>,
     spinner: gtk::Spinner,
 }
@@ -179,6 +181,18 @@ impl ViewState {
                 }
             }
             BrowserEvent::PeekClosed => self.close_peek_visual(),
+            BrowserEvent::FocusChanged { depth, position } => {
+                if let Some(column) = self.columns.borrow().get(depth) {
+                    if let Some(position) = position {
+                        column.selection.set_selected(position as u32);
+                        column
+                            .list
+                            .scroll_to(position as u32, gtk::ListScrollFlags::FOCUS, None);
+                    }
+                    column.list.grab_focus();
+                }
+            }
+            BrowserEvent::OpenRequested { location } => open_file(location.path()),
         }
     }
 
@@ -256,7 +270,7 @@ impl ViewState {
             label.set_label(&value.string());
         });
 
-        let list = gtk::ListView::new(Some(selection), Some(factory));
+        let list = gtk::ListView::new(Some(selection.clone()), Some(factory));
         list.add_css_class("file-list");
         list.set_single_click_activate(true);
         list.set_vexpand(true);
@@ -298,6 +312,8 @@ impl ViewState {
         self.columns_widget.append(&revealer);
         self.columns.borrow_mut().push(ColumnView {
             model,
+            selection,
+            list,
             entries,
             spinner,
         });

@@ -56,6 +56,7 @@ impl NavigationPath {
 #[derive(Default)]
 pub struct NavigationState {
     pub columns: Vec<ColumnState>,
+    active_column: Option<usize>,
     peek: Option<PeekState>,
     back_history: Vec<NavigationPath>,
     forward_history: Vec<NavigationPath>,
@@ -81,6 +82,7 @@ impl NavigationState {
         self.peek = None;
         self.columns.truncate(parent_depth + 1);
         self.push_column(location, request_id);
+        self.active_column = self.columns.len().checked_sub(1);
         true
     }
 
@@ -124,6 +126,7 @@ impl NavigationState {
                 request_id,
             })
             .collect();
+        self.active_column = self.columns.len().checked_sub(1);
     }
 
     fn current_path(&self) -> Option<NavigationPath> {
@@ -231,7 +234,57 @@ impl NavigationState {
             return false;
         }
         column.selected = Some(position);
+        self.active_column = Some(depth);
         true
+    }
+
+    pub fn move_selection(&mut self, direction: i32) -> Option<(usize, usize)> {
+        let depth = self
+            .active_column
+            .or_else(|| self.columns.len().checked_sub(1))?;
+        let column = self.columns.get_mut(depth)?;
+        if column.entries.is_empty() {
+            return None;
+        }
+
+        let last = column.entries.len() - 1;
+        let position = match (column.selected, direction.cmp(&0)) {
+            (None, std::cmp::Ordering::Less) => last,
+            (None, _) => 0,
+            (Some(position), std::cmp::Ordering::Less) => position.saturating_sub(1),
+            (Some(position), std::cmp::Ordering::Greater) => (position + 1).min(last),
+            (Some(position), std::cmp::Ordering::Equal) => position,
+        };
+        column.selected = Some(position);
+        self.active_column = Some(depth);
+        Some((depth, position))
+    }
+
+    pub fn focus_parent(&mut self) -> Option<(usize, Option<usize>)> {
+        let depth = self.active_column?;
+        let parent_depth = depth.checked_sub(1)?;
+        self.active_column = Some(parent_depth);
+        Some((parent_depth, self.columns[parent_depth].selected))
+    }
+
+    pub fn close_deepest(&mut self) -> Option<(usize, Option<usize>)> {
+        if self.columns.len() <= 1 {
+            return None;
+        }
+        self.record_navigation();
+        self.peek = None;
+        self.columns.truncate(self.columns.len() - 1);
+        let depth = self.columns.len() - 1;
+        self.active_column = Some(depth);
+        Some((depth, self.columns[depth].selected))
+    }
+
+    pub fn focused_entry(&self) -> Option<(usize, usize, FileEntry)> {
+        let depth = self.active_column?;
+        let column = self.columns.get(depth)?;
+        let position = column.selected?;
+        let entry = column.entries.get(position)?.clone();
+        Some((depth, position, entry))
     }
 
     fn column_for_request_mut(

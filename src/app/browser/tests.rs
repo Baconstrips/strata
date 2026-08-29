@@ -111,3 +111,65 @@ fn committing_a_peek_descends_and_creates_history() {
         .count();
     assert_eq!(resets, 2, "committing a peek must create a history entry");
 }
+
+#[test]
+fn keyboard_selection_and_activation_descend_without_the_ui() {
+    let browser = Browser::new(Rc::new(FakeFileSource));
+    let events = Rc::new(RefCell::new(Vec::new()));
+    let observed = events.clone();
+    browser.observe(move |event| observed.borrow_mut().push(event));
+    browser.navigate(Location::local("/fixture"));
+
+    browser.move_selection(1);
+    browser.activate_focused();
+
+    assert!(events.borrow().iter().any(|event| matches!(
+        event,
+        BrowserEvent::FocusChanged {
+            depth: 0,
+            position: Some(0)
+        }
+    )));
+    assert!(
+        events
+            .borrow()
+            .iter()
+            .any(|event| matches!(event, BrowserEvent::ColumnAdded { depth: 1, .. }))
+    );
+}
+
+#[test]
+fn escape_closes_a_peek_before_the_deepest_column() {
+    let browser = Browser::new(Rc::new(FakeFileSource));
+    let events = Rc::new(RefCell::new(Vec::new()));
+    let observed = events.clone();
+    browser.observe(move |event| observed.borrow_mut().push(event));
+    browser.navigate(Location::local("/fixture"));
+    browser.move_selection(1);
+    browser.activate_focused();
+    browser.begin_peek(1, Location::local("/fixture/child/child"));
+    events.borrow_mut().clear();
+
+    browser.escape();
+    assert!(
+        events
+            .borrow()
+            .iter()
+            .any(|event| matches!(event, BrowserEvent::PeekClosed))
+    );
+    assert!(
+        !events
+            .borrow()
+            .iter()
+            .any(|event| matches!(event, BrowserEvent::ColumnsTruncated { .. }))
+    );
+
+    events.borrow_mut().clear();
+    browser.escape();
+    assert!(
+        events
+            .borrow()
+            .iter()
+            .any(|event| matches!(event, BrowserEvent::ColumnsTruncated { len: 1 }))
+    );
+}

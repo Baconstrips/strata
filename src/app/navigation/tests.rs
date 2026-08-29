@@ -86,3 +86,43 @@ fn parent_removes_the_deepest_committed_column() {
     let parent = state.go_parent().expect("the path has a parent");
     assert_eq!(parent.locations(), &[location("/home")]);
 }
+
+#[test]
+fn keyboard_selection_is_bounded_and_tracks_the_active_column() {
+    let mut state = NavigationState::default();
+    state.navigate(location("/home"), RequestId(1));
+    state.apply_batch(RequestId(1), &[entry("/home/one"), entry("/home/two")]);
+
+    assert_eq!(state.move_selection(1), Some((0, 0)));
+    assert_eq!(state.move_selection(1), Some((0, 1)));
+    assert_eq!(state.move_selection(1), Some((0, 1)));
+    assert_eq!(state.move_selection(-1), Some((0, 0)));
+    assert_eq!(state.move_selection(-1), Some((0, 0)));
+}
+
+#[test]
+fn moving_to_the_parent_column_restores_its_selection() {
+    let mut state = NavigationState::default();
+    state.navigate(location("/home"), RequestId(1));
+    state.apply_batch(RequestId(1), &[entry("/home/projects")]);
+    assert!(state.select(0, 0));
+    assert!(state.descend(0, location("/home/projects"), RequestId(2)));
+
+    assert_eq!(state.focus_parent(), Some((0, Some(0))));
+    let (depth, position, focused) = state.focused_entry().expect("parent entry remains focused");
+    assert_eq!((depth, position), (0, 0));
+    assert_eq!(focused.location, location("/home/projects"));
+}
+
+#[test]
+fn closing_the_deepest_column_preserves_the_parent_selection() {
+    let mut state = NavigationState::default();
+    state.navigate(location("/home"), RequestId(1));
+    state.apply_batch(RequestId(1), &[entry("/home/projects")]);
+    assert!(state.select(0, 0));
+    assert!(state.descend(0, location("/home/projects"), RequestId(2)));
+
+    assert_eq!(state.close_deepest(), Some((0, Some(0))));
+    assert_eq!(state.columns.len(), 1);
+    assert_eq!(state.close_deepest(), None);
+}
