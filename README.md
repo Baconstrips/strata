@@ -39,6 +39,21 @@ Strata is an experimental, keyboard-first file manager for Linux. It is designed
 - GIO
 - Native Wayland support
 
+## Technical highlights
+
+Strata is built around a small application model rather than placing filesystem logic in GTK widgets:
+
+- **Native paths stay native.** Invalid UTF-8 names retain their original Linux path bytes and are converted only for display.
+- **Navigation and peeking are separate.** Committed Miller columns participate in history; temporary hover peeks never mutate it.
+- **Filesystem work is cancellable.** Directory requests carry generations, stream bounded batches, and reject stale results after rapid navigation.
+- **Large directories stay virtualized.** Rows render through GTK list models and are exercised against deterministic fixtures containing up to 100,000 entries.
+- **Monitoring is incremental.** Coalesced create, remove, move, and metadata events update sorted columns in place while ambiguous events safely fall back to a rescan.
+- **Selection survives change.** Sorting, monitoring, and reloads preserve selection by native location rather than fragile row index.
+- **Motion avoids layout churn.** Columns reserve their final width before animating, and horizontal reveal targets remain stable during deep navigation.
+- **Failure is explicit.** Loading, empty, unavailable, and error states are distinct, with retry support that does not rewrite navigation history.
+
+The architectural boundaries and performance workflow are documented in [`docs/architecture.md`](docs/architecture.md) and [`docs/performance-baseline.md`](docs/performance-baseline.md).
+
 ## Development
 
 ### Requirements

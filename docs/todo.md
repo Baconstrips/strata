@@ -102,7 +102,7 @@ Legend: **P0** blocks the milestone, **P1** is required for its exit criteria, *
 - [x] **P0** Hidden-file toggle
 - [x] **P0** Stable sorting by name, type, size, and modified time
 - [x] **P0** Monitor directory changes and reload affected columns
-- [ ] **P0** Apply directory-monitor changes incrementally without a full reload
+- [x] **P0** Apply directory-monitor changes incrementally without a full reload
 - [x] **P0** Preserve UI responsiveness in 100k-entry fixture
 - [ ] **P1** Handle invalid UTF-8 display names without losing native paths
 - [ ] **P1** Handle broken symlinks and files disappearing during navigation

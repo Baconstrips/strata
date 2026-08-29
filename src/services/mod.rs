@@ -3,5 +3,6 @@
 mod file_source;
 
 pub use file_source::{
-    DirectoryEvent, DirectoryRequest, FileSource, LoadHandle, LocationValidationError, RequestId,
+    DirectoryChange, DirectoryEvent, DirectoryRequest, FileSource, LoadHandle,
+    LocationValidationError, RequestId,
 };

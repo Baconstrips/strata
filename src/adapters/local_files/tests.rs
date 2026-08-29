@@ -36,6 +36,32 @@ fn validation_accepts_readable_directories_and_rejects_files_and_missing_paths()
 }
 
 #[test]
+fn coalescing_preserves_a_move_when_metadata_follows_it() {
+    let change = merge_pending_change(
+        PendingMonitorChange::Move {
+            from: "/fixture/old".into(),
+            to: "/fixture/new".into(),
+        },
+        PendingMonitorChange::Upsert("/fixture/new".into()),
+    );
+
+    assert!(matches!(change, PendingMonitorChange::Move { .. }));
+}
+
+#[test]
+fn conflicting_move_events_fall_back_to_a_rescan() {
+    let change = merge_pending_change(
+        PendingMonitorChange::Move {
+            from: "/fixture/old".into(),
+            to: "/fixture/new".into(),
+        },
+        PendingMonitorChange::Remove("/fixture/new".into()),
+    );
+
+    assert!(matches!(change, PendingMonitorChange::Rescan));
+}
+
+#[test]
 fn permission_errors_are_reported_as_inaccessible() {
     let error = std::io::Error::from(ErrorKind::PermissionDenied);
     assert_eq!(

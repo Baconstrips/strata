@@ -7,11 +7,11 @@ use std::{
 };
 
 use crate::{
-    app::navigation::{EntryInsertion, NavigationPath, NavigationState},
+    app::navigation::{EntryInsertion, EntrySplice, NavigationPath, NavigationState},
     model::{FileEntry, Location, SortDirection, SortKey, ViewPreferences},
     services::{
-        DirectoryEvent, DirectoryRequest, FileSource, LoadHandle, LocationValidationError,
-        RequestId,
+        DirectoryChange, DirectoryEvent, DirectoryRequest, FileSource, LoadHandle,
+        LocationValidationError, RequestId,
     },
 };
 
@@ -32,6 +32,11 @@ pub enum BrowserEvent {
     EntriesReplaced {
         depth: usize,
         entries: Vec<FileEntry>,
+    },
+    EntriesSpliced {
+        depth: usize,
+        splices: Vec<EntrySplice>,
+        selected: Option<usize>,
     },
     ColumnReloaded {
         depth: usize,
@@ -265,13 +270,21 @@ impl Browser {
         preferences.show_hidden = !preferences.show_hidden;
         self.preferences.set(preferences);
 
-        let column_count = {
+        let locations = {
             let mut state = self.state.borrow_mut();
             state.set_preferences(preferences);
-            state.columns.len()
+            state
+                .columns
+                .iter()
+                .map(|column| column.location.clone())
+                .collect::<Vec<_>>()
         };
-        for depth in 0..column_count {
+        for (depth, location) in locations.into_iter().enumerate() {
             self.refresh_column(depth);
+            let monitor = self.install_monitor(depth, location);
+            if let Some(slot) = self.monitors.borrow_mut().get_mut(depth) {
+                *slot = monitor;
+            }
         }
     }
 
@@ -401,15 +414,20 @@ impl Browser {
         let handle = self.request_directory(location.clone(), request_id);
         self.loads.borrow_mut().push(handle);
 
+        let monitor = self.install_monitor(depth, location);
+        self.monitors.borrow_mut().push(monitor);
+    }
+
+    fn install_monitor(self: &Rc<Self>, depth: usize, location: Location) -> Option<LoadHandle> {
         let weak: Weak<Self> = Rc::downgrade(self);
-        let notify = Rc::new(move || {
+        let watched = location.clone();
+        let notify = Rc::new(move |change| {
             if let Some(browser) = weak.upgrade() {
-                browser.refresh_column(depth);
+                browser.handle_directory_change(depth, &watched, change);
             }
         });
-        self.monitors
-            .borrow_mut()
-            .push(self.source.watch(location, notify));
+        self.source
+            .watch(location, self.preferences.get().show_hidden, notify)
     }
 
     fn request_directory(self: &Rc<Self>, location: Location, request_id: RequestId) -> LoadHandle {
@@ -444,6 +462,38 @@ impl Browser {
         let handle = self.request_directory(location, request_id);
         if let Some(load) = self.loads.borrow_mut().get_mut(depth) {
             *load = handle;
+        }
+    }
+
+    fn handle_directory_change(
+        self: &Rc<Self>,
+        depth: usize,
+        watched: &Location,
+        change: DirectoryChange,
+    ) {
+        if matches!(&change, DirectoryChange::Rescan) {
+            self.refresh_column(depth);
+            return;
+        }
+        let path_update = self
+            .state
+            .borrow()
+            .path_after_external_change(depth, &change);
+        if let Some(path) = path_update {
+            self.restore_path(path);
+            return;
+        }
+
+        let application = self
+            .state
+            .borrow_mut()
+            .apply_directory_change(depth, watched, change);
+        if let Some((splices, selected)) = application {
+            self.emit(BrowserEvent::EntriesSpliced {
+                depth,
+                splices,
+                selected,
+            });
         }
     }
 

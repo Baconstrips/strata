@@ -43,6 +43,14 @@ impl fmt::Display for LocationValidationError {
 }
 
 #[derive(Clone, Debug)]
+pub enum DirectoryChange {
+    Upsert(FileEntry),
+    Remove(Location),
+    Move { from: Location, entry: FileEntry },
+    Rescan,
+}
+
+#[derive(Clone, Debug)]
 pub enum DirectoryEvent {
     Batch {
         request_id: RequestId,
@@ -83,7 +91,12 @@ pub trait FileSource {
 
     fn enumerate(&self, request: DirectoryRequest, emit: Rc<dyn Fn(DirectoryEvent)>) -> LoadHandle;
 
-    fn watch(&self, _location: Location, _notify: Rc<dyn Fn()>) -> Option<LoadHandle> {
+    fn watch(
+        &self,
+        _location: Location,
+        _include_hidden: bool,
+        _notify: Rc<dyn Fn(DirectoryChange)>,
+    ) -> Option<LoadHandle> {
         None
     }
 }

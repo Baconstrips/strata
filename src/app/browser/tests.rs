@@ -24,7 +24,7 @@ struct RecordingFileSource {
     include_hidden: Rc<RefCell<Vec<bool>>>,
 }
 
-type WatchCallback = Rc<dyn Fn()>;
+type WatchCallback = Rc<dyn Fn(DirectoryChange)>;
 
 struct WatchingFileSource {
     notify: Rc<RefCell<Option<WatchCallback>>>,
@@ -53,7 +53,12 @@ impl FileSource for WatchingFileSource {
         LoadHandle::new(|| {})
     }
 
-    fn watch(&self, _location: Location, notify: Rc<dyn Fn()>) -> Option<LoadHandle> {
+    fn watch(
+        &self,
+        _location: Location,
+        _include_hidden: bool,
+        notify: Rc<dyn Fn(DirectoryChange)>,
+    ) -> Option<LoadHandle> {
         self.notify.replace(Some(notify));
         Some(LoadHandle::new(|| {}))
     }
@@ -163,7 +168,7 @@ impl FileSource for FakeFileSource {
 }
 
 #[test]
-fn filesystem_notifications_reload_the_affected_column() {
+fn filesystem_notifications_update_the_affected_column_incrementally() {
     let notify = Rc::new(RefCell::new(None::<WatchCallback>));
     let browser = Browser::new(Rc::new(WatchingFileSource {
         notify: notify.clone(),
@@ -178,19 +183,51 @@ fn filesystem_notifications_reload_the_affected_column() {
         .borrow()
         .clone()
         .expect("the directory watcher should be installed");
-    callback();
+    callback(DirectoryChange::Upsert(FileEntry {
+        location: Location::local("/fixture/added"),
+        native_name: OsString::from("added"),
+        display_name: "added".into(),
+        kind: EntryKind::File,
+        size: MetadataValue::Known(4),
+        modified_unix_seconds: MetadataValue::Known(1),
+    }));
+
+    assert!(events.borrow().iter().any(|event| matches!(
+        event,
+        BrowserEvent::EntriesSpliced { depth: 0, splices, .. }
+            if splices.len() == 1 && splices[0].removed == 0 && splices[0].entries.len() == 1
+    )));
+    assert!(
+        !events
+            .borrow()
+            .iter()
+            .any(|event| matches!(event, BrowserEvent::ColumnReloaded { .. }))
+    );
+}
+
+#[test]
+fn ambiguous_filesystem_notifications_fall_back_to_reload() {
+    let notify = Rc::new(RefCell::new(None::<WatchCallback>));
+    let browser = Browser::new(Rc::new(WatchingFileSource {
+        notify: notify.clone(),
+    }));
+    let events = Rc::new(RefCell::new(Vec::new()));
+    let observed = events.clone();
+    browser.observe(move |event| observed.borrow_mut().push(event));
+    browser.navigate(Location::local("/fixture"));
+    events.borrow_mut().clear();
+
+    let callback = notify
+        .borrow()
+        .clone()
+        .expect("the directory watcher should be installed");
+    callback(DirectoryChange::Rescan);
 
     assert!(
         events
             .borrow()
             .iter()
             .any(|event| matches!(event, BrowserEvent::ColumnReloaded { depth: 0 }))
-    );
-    assert!(
-        events
-            .borrow()
-            .iter()
-            .any(|event| matches!(event, BrowserEvent::EntriesInserted { depth: 0, .. }))
     );
 }
 

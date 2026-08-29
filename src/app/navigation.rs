@@ -5,7 +5,7 @@ use std::cmp::Ordering;
 use crate::{
     app::peek::PeekState,
     model::{FileEntry, Location, MetadataValue, SortDirection, SortKey, ViewPreferences},
-    services::RequestId,
+    services::{DirectoryChange, RequestId},
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -19,6 +19,13 @@ pub enum LoadState {
 #[derive(Clone, Debug)]
 pub struct EntryInsertion {
     pub position: usize,
+    pub entries: Vec<FileEntry>,
+}
+
+#[derive(Clone, Debug)]
+pub struct EntrySplice {
+    pub position: usize,
+    pub removed: usize,
     pub entries: Vec<FileEntry>,
 }
 
@@ -151,6 +158,38 @@ impl NavigationState {
         })
     }
 
+    pub fn path_after_external_change(
+        &self,
+        origin_depth: usize,
+        change: &DirectoryChange,
+    ) -> Option<NavigationPath> {
+        let mut locations = self.current_path()?.locations;
+        match change {
+            DirectoryChange::Move { from, entry } => {
+                let mut changed = false;
+                for location in locations.iter_mut().skip(origin_depth + 1) {
+                    let Ok(suffix) = location.path().strip_prefix(from.path()) else {
+                        continue;
+                    };
+                    *location = Location::local(entry.location.path().join(suffix));
+                    changed = true;
+                }
+                changed.then(|| NavigationPath::from_locations(locations))
+            }
+            DirectoryChange::Remove(removed) => {
+                let affected = locations
+                    .iter()
+                    .enumerate()
+                    .skip(origin_depth + 1)
+                    .find(|(_, location)| location.path().starts_with(removed.path()))
+                    .map(|(depth, _)| depth)?;
+                locations.truncate(affected);
+                Some(NavigationPath::from_locations(locations))
+            }
+            DirectoryChange::Upsert(_) | DirectoryChange::Rescan => None,
+        }
+    }
+
     fn record_navigation(&mut self) {
         if let Some(current) = self.current_path() {
             self.back_history.push(current);
@@ -195,6 +234,69 @@ impl NavigationState {
             }
         }
         Some((depth, insertions))
+    }
+
+    pub fn apply_directory_change(
+        &mut self,
+        depth: usize,
+        watched: &Location,
+        change: DirectoryChange,
+    ) -> Option<(Vec<EntrySplice>, Option<usize>)> {
+        let preferences = self.preferences;
+        let column = self
+            .columns
+            .get_mut(depth)
+            .filter(|column| &column.location == watched)?;
+        let mut selected_location = column
+            .selected
+            .and_then(|position| column.entries.get(position))
+            .map(|entry| entry.location.clone());
+        let mut splices = Vec::new();
+
+        match change {
+            DirectoryChange::Upsert(entry) => {
+                if column
+                    .entries
+                    .iter()
+                    .find(|current| current.location == entry.location)
+                    == Some(&entry)
+                {
+                    return None;
+                }
+                remove_monitored_entry(&mut column.entries, &entry.location, &mut splices);
+                insert_monitored_entry(&mut column.entries, entry, preferences, &mut splices);
+            }
+            DirectoryChange::Remove(location) => {
+                remove_monitored_entry(&mut column.entries, &location, &mut splices);
+            }
+            DirectoryChange::Move { from, entry } => {
+                if selected_location.as_ref() == Some(&from) {
+                    selected_location = Some(entry.location.clone());
+                }
+                remove_monitored_entry(&mut column.entries, &from, &mut splices);
+                if entry.location != from {
+                    remove_monitored_entry(&mut column.entries, &entry.location, &mut splices);
+                }
+                insert_monitored_entry(&mut column.entries, entry, preferences, &mut splices);
+            }
+            DirectoryChange::Rescan => return None,
+        }
+
+        if splices.is_empty() {
+            return None;
+        }
+        column.selected = selected_location.and_then(|location| {
+            column
+                .entries
+                .iter()
+                .position(|entry| entry.location == location)
+        });
+        column.load_state = if column.entries.is_empty() {
+            LoadState::Empty
+        } else {
+            LoadState::Ready
+        };
+        Some((splices, column.selected))
     }
 
     pub fn reload_column(&mut self, depth: usize, request_id: RequestId) -> Option<Location> {
@@ -437,6 +539,38 @@ fn merge_entries(
     }
 
     (merged, insertions)
+}
+
+fn remove_monitored_entry(
+    entries: &mut Vec<FileEntry>,
+    location: &Location,
+    splices: &mut Vec<EntrySplice>,
+) {
+    if let Some(position) = entries.iter().position(|entry| &entry.location == location) {
+        entries.remove(position);
+        splices.push(EntrySplice {
+            position,
+            removed: 1,
+            entries: Vec::new(),
+        });
+    }
+}
+
+fn insert_monitored_entry(
+    entries: &mut Vec<FileEntry>,
+    entry: FileEntry,
+    preferences: ViewPreferences,
+    splices: &mut Vec<EntrySplice>,
+) {
+    let position = entries
+        .binary_search_by(|current| compare_entries(current, &entry, preferences))
+        .unwrap_or_else(|position| position);
+    entries.insert(position, entry.clone());
+    splices.push(EntrySplice {
+        position,
+        removed: 0,
+        entries: vec![entry],
+    });
 }
 
 fn compare_entries(left: &FileEntry, right: &FileEntry, preferences: ViewPreferences) -> Ordering {

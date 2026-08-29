@@ -434,6 +434,43 @@ impl ViewState {
                     column.entry_count.set(entries.len());
                 }
             }
+            BrowserEvent::EntriesSpliced {
+                depth,
+                splices,
+                selected,
+            } => {
+                if let Some(column) = self.columns.borrow().get(depth) {
+                    let mut count = column.entry_count.get();
+                    for splice in splices {
+                        let labels: Vec<_> = splice
+                            .entries
+                            .iter()
+                            .map(|entry| {
+                                let prefix = if entry.is_directory() { "▸  " } else { "   " };
+                                format!("{prefix}{}", entry.display_name)
+                            })
+                            .collect();
+                        let labels: Vec<_> = labels.iter().map(String::as_str).collect();
+                        column
+                            .model
+                            .splice(splice.position as u32, splice.removed as u32, &labels);
+                        count = count
+                            .saturating_sub(splice.removed)
+                            .saturating_add(splice.entries.len());
+                    }
+                    column.entry_count.set(count);
+                    column.selection.set_selected(
+                        selected
+                            .map(|position| position as u32)
+                            .unwrap_or(gtk::INVALID_LIST_POSITION),
+                    );
+                    if count == 0 {
+                        column.presentation.show_empty();
+                    } else {
+                        column.presentation.show_content();
+                    }
+                }
+            }
             BrowserEvent::ColumnReloaded { depth } => {
                 if let Some(column) = self.columns.borrow().get(depth) {
                     column.model.splice(0, column.model.n_items(), &[]);

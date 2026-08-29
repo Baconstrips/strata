@@ -3,7 +3,10 @@
 use std::ffi::OsString;
 
 use super::*;
-use crate::model::{EntryKind, MetadataValue};
+use crate::{
+    model::{EntryKind, MetadataValue},
+    services::DirectoryChange,
+};
 
 fn location(path: &str) -> Location {
     Location::local(path)
@@ -22,6 +25,150 @@ fn named_entry(path: &str, name: &str) -> FileEntry {
         size: MetadataValue::Unknown,
         modified_unix_seconds: MetadataValue::Unknown,
     }
+}
+
+#[test]
+fn monitor_insertions_follow_the_active_sort_order() {
+    let mut state = NavigationState::default();
+    let watched = location("/home");
+    state.navigate(watched.clone(), RequestId(1));
+    state.apply_batch(
+        RequestId(1),
+        vec![
+            named_entry("/home/alpha", "alpha"),
+            named_entry("/home/charlie", "charlie"),
+        ],
+    );
+
+    let (splices, _) = state
+        .apply_directory_change(
+            0,
+            &watched,
+            DirectoryChange::Upsert(named_entry("/home/bravo", "bravo")),
+        )
+        .expect("the new entry should change the column");
+
+    assert_eq!(splices.len(), 1);
+    assert_eq!(splices[0].position, 1);
+    assert_eq!(splices[0].removed, 0);
+    assert_eq!(splices[0].entries[0].display_name, "bravo");
+}
+
+#[test]
+fn monitor_updates_reposition_only_the_changed_entry() {
+    let mut state = NavigationState::default();
+    let watched = location("/home");
+    state.navigate(watched.clone(), RequestId(1));
+    state.apply_batch(
+        RequestId(1),
+        vec![
+            named_entry("/home/alpha", "alpha"),
+            named_entry("/home/bravo", "bravo"),
+            named_entry("/home/charlie", "charlie"),
+        ],
+    );
+
+    let (splices, _) = state
+        .apply_directory_change(
+            0,
+            &watched,
+            DirectoryChange::Upsert(named_entry("/home/alpha", "zulu")),
+        )
+        .expect("renaming an entry should change the column");
+
+    assert_eq!(splices.len(), 2);
+    assert_eq!(splices[0].removed, 1);
+    assert_eq!(splices[1].entries.len(), 1);
+    assert_eq!(state.columns[0].entries[2].display_name, "zulu");
+}
+
+#[test]
+fn monitor_removals_preserve_selection_by_native_location() {
+    let mut state = NavigationState::default();
+    let watched = location("/home");
+    state.navigate(watched.clone(), RequestId(1));
+    state.apply_batch(
+        RequestId(1),
+        vec![
+            named_entry("/home/alpha", "alpha"),
+            named_entry("/home/bravo", "bravo"),
+        ],
+    );
+    assert!(state.select(0, 1));
+
+    let (_, selected) = state
+        .apply_directory_change(
+            0,
+            &watched,
+            DirectoryChange::Remove(location("/home/alpha")),
+        )
+        .expect("removing an entry should change the column");
+
+    assert_eq!(selected, Some(0));
+    assert_eq!(state.columns[0].entries[0].display_name, "bravo");
+}
+
+#[test]
+fn monitor_moves_follow_the_selected_entry() {
+    let mut state = NavigationState::default();
+    let watched = location("/home");
+    state.navigate(watched.clone(), RequestId(1));
+    state.apply_batch(RequestId(1), vec![named_entry("/home/old", "old")]);
+    assert!(state.select(0, 0));
+
+    let (_, selected) = state
+        .apply_directory_change(
+            0,
+            &watched,
+            DirectoryChange::Move {
+                from: location("/home/old"),
+                entry: named_entry("/home/new", "new"),
+            },
+        )
+        .expect("moving an entry should change the column");
+
+    assert_eq!(selected, Some(0));
+    assert_eq!(state.columns[0].entries[0].location, location("/home/new"));
+}
+
+#[test]
+fn external_moves_rebase_open_descendant_locations() {
+    let mut state = NavigationState::default();
+    state.navigate(location("/home"), RequestId(1));
+    assert!(state.descend(0, location("/home/old"), RequestId(2)));
+    assert!(state.descend(1, location("/home/old/deep"), RequestId(3)));
+
+    let path = state
+        .path_after_external_change(
+            0,
+            &DirectoryChange::Move {
+                from: location("/home/old"),
+                entry: named_entry("/home/new", "new"),
+            },
+        )
+        .expect("the open path should be rebased");
+
+    assert_eq!(
+        path.locations(),
+        &[
+            location("/home"),
+            location("/home/new"),
+            location("/home/new/deep"),
+        ]
+    );
+}
+
+#[test]
+fn external_removals_close_affected_descendant_columns() {
+    let mut state = NavigationState::default();
+    state.navigate(location("/home"), RequestId(1));
+    assert!(state.descend(0, location("/home/removed"), RequestId(2)));
+
+    let path = state
+        .path_after_external_change(0, &DirectoryChange::Remove(location("/home/removed")))
+        .expect("the removed open path should be closed");
+
+    assert_eq!(path.locations(), &[location("/home")]);
 }
 
 #[test]
