@@ -76,6 +76,14 @@ Run Strata:
 cargo run
 ```
 
+For development, run Strata in auto-reload mode. The app rebuilds and restarts
+when code or bundled assets change, installing `cargo-watch` automatically if
+needed:
+
+```bash
+make start-dev
+```
+
 Run the standard quality checks:
 
 ```bash

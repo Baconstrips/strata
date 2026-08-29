@@ -16,6 +16,14 @@ Run the application:
 cargo run
 ```
 
+To rebuild and restart the running application whenever code or bundled assets
+change, use the development watcher. It installs `cargo-watch` automatically if
+needed:
+
+```bash
+make start-dev
+```
+
 ## Required checks
 
 Before opening a pull request:

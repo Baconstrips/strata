@@ -246,6 +246,7 @@ impl BrowserView {
         location_stack.set_visible_child_name("breadcrumbs");
         location_stack.add_css_class("location-control");
         location_stack.set_hexpand(true);
+        location_stack.set_valign(gtk::Align::Center);
 
         let browser = Browser::new(source);
         let state = Rc::new(ViewState {

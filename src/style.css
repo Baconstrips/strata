@@ -115,8 +115,29 @@ headerbar menubutton.header-action > button:checked {
   opacity: 0.42;
 }
 
-.location-entry {
+.location-entry,
+.location-entry:focus {
+  background: @theme_bg;
+  border: 1px solid alpha(@theme_border, 0.7);
+  box-shadow: none;
+  caret-color: @theme_accent;
+  color: @theme_text;
   min-height: 22px;
+}
+
+.location-entry:focus {
+  border-color: @theme_accent;
+  box-shadow: 0 0 0 1px alpha(@theme_accent, 0.38);
+}
+
+.location-entry placeholder {
+  color: @theme_dim_text;
+  opacity: 1;
+}
+
+.location-entry selection {
+  background: @theme_accent;
+  color: @theme_bg;
 }
 
 .location-action {
