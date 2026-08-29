@@ -163,6 +163,8 @@ Legend: **P0** blocks the milestone, **P1** is required for its exit criteria, *
 - [ ] **P0** Export selected files as GTK/GDK file-list and `text/uri-list` drag data for browsers, editors, desktop targets, and other external applications
 - [ ] **P1** Test outbound file dragging across native Wayland applications, XWayland applications, and browser upload targets
 - [ ] **P1** Removable media mount, unmount, and disconnect states
+- [ ] **P1** Show an Unmount action only for volumes that report they can be unmounted
+- [ ] **P1** Confirm unmounting, report busy/error states, and refresh the sidebar after completion
 - [ ] **P1** Notifications for completed long-running operations
 
 ## M3 — Search and previews
