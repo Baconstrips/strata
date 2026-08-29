@@ -41,7 +41,6 @@ pub mod icons {
     pub const SEARCH: &str = "strata-search";
     pub const SETTINGS: &str = "strata-settings";
     pub const SETTINGS_2: &str = "strata-settings-2";
-    pub const SETTINGS_ACTIVE: &str = "strata-settings-active";
     pub const SLIDERS: &str = "strata-sliders-horizontal";
     pub const TERMINAL: &str = "strata-terminal";
     pub const TRASH: &str = "strata-trash";
@@ -138,7 +137,7 @@ fn primary_icon_texture(name: &str, color: &str) -> Option<gdk::Texture> {
     let path = format!("/io/github/lgse/Strata/icons/scalable/actions/{name}.svg");
     let data = gio::resources_lookup_data(&path, gio::ResourceLookupFlags::NONE).ok()?;
     let source = std::str::from_utf8(data.as_ref()).ok()?;
-    let mut source = source.replace("#8bc9eb", color);
+    let mut source = recolor_icon_source(source, color);
     if name == icons::FOLDER {
         source = source.replacen(
             "fill=\"none\"",
@@ -148,6 +147,13 @@ fn primary_icon_texture(name: &str, color: &str) -> Option<gdk::Texture> {
     }
     let pixbuf = gdk_pixbuf::Pixbuf::from_read(Cursor::new(source.into_bytes())).ok()?;
     Some(gdk::Texture::for_pixbuf(&pixbuf))
+}
+
+fn recolor_icon_source(source: &str, color: &str) -> String {
+    source
+        .replace("#8bc9eb", color)
+        .replace("#22d3ee", color)
+        .replace("#2e3436", color)
 }
 
 fn write_if_changed(path: &Path, contents: &[u8]) -> io::Result<()> {
@@ -198,3 +204,6 @@ fn register_application_fonts(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests;

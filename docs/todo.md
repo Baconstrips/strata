@@ -92,7 +92,7 @@ Legend: **P0** blocks the milestone, **P1** is required for its exit criteria, *
 
 - [x] **P0** Arrow and `h/j/k/l` navigation
 - [x] **P0** Enter/open and Escape/close-peek-or-column actions
-- [ ] **P0** Space/preview action
+- [x] **P0** Space/preview action
 - [x] **P0** Define focus transfer between columns and location entry
 - [ ] **P0** Define focus transfer for sidebar, search, and preview
 - [x] **P1** Visible distinction between focus and selection
@@ -167,15 +167,15 @@ Legend: **P0** blocks the milestone, **P1** is required for its exit criteria, *
 
 - [ ] **P0** Add MIME-aware preview registry with provider priorities
 - [ ] **P0** Enforce byte, time, pixel, and concurrency budgets
-- [ ] **P0** Cancel previews when selection changes
-- [ ] **P0** Generic metadata and unsupported fallback
+- [x] **P0** Cancel previews when selection changes
+- [x] **P0** Generic metadata and unsupported fallback
 - [ ] **P1** Freedesktop-compatible thumbnail cache
 - [ ] **P1** Isolate provider failures from navigation
 
 ### Built-in previews
 
-- [ ] **P0** Common image formats
-- [ ] **P0** Bounded plain text and source preview
+- [x] **P0** Common image formats
+- [x] **P0** Bounded plain text and source preview
 - [ ] **P1** Markdown rendering
 - [ ] **P1** PDF first page
 - [ ] **P1** Audio metadata and artwork
@@ -191,7 +191,7 @@ Legend: **P0** blocks the milestone, **P1** is required for its exit criteria, *
 - [ ] **P0** Virtualized grid mode
 - [ ] **P0** Compact and airy density presets
 - [ ] **P1** Configurable icon/thumbnail size
-- [ ] **P1** Resizable and collapsible preview pane
+- [x] **P1** Resizable and collapsible preview pane
 - [ ] **P1** Persist view preferences at the agreed scope
 
 ### Theme system

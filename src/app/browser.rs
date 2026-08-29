@@ -366,6 +366,13 @@ impl Browser {
         self.state.borrow().entry_at(depth, position)
     }
 
+    pub fn focused_entry(&self) -> Option<FileEntry> {
+        self.state
+            .borrow()
+            .focused_entry()
+            .map(|(_, _, entry)| entry)
+    }
+
     pub fn active_child_position(&self, depth: usize) -> Option<usize> {
         self.state.borrow().active_child_position(depth)
     }

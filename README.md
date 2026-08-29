@@ -61,13 +61,14 @@ The architectural boundaries and performance workflow are documented in [`docs/a
 
 - Rust 1.85 or newer
 - GTK 4.12 or newer
+- GtkSourceView 5
 - Fontconfig
 - A C toolchain and `pkg-config`
 
 On Arch Linux:
 
 ```bash
-sudo pacman -S --needed base-devel rust fontconfig gtk4
+sudo pacman -S --needed base-devel rust fontconfig gtk4 gtksourceview5
 ```
 
 Run Strata:

@@ -10,12 +10,17 @@ use std::{
 
 use gtk::{gio, glib, prelude::*};
 
-use crate::{adapters::LocalFileSource, app::Browser, model::Location};
+use crate::{
+    adapters::{LocalFileSource, LocalPreviewProvider},
+    app::{Browser, BrowserEvent},
+    model::Location,
+};
 
 use super::{
     blur::BlurBin,
     browser::{BrowserView, PeekBehavior},
     motion::{animations_enabled, emphasized_deceleration},
+    preview::PreviewDrawer,
 };
 
 const SIDEBAR_WIDTH: i32 = 208;
@@ -39,33 +44,59 @@ pub fn present_location(application: &gtk::Application, location: Option<PathBuf
 
     let browser = BrowserView::new(Rc::new(LocalFileSource), PeekBehavior::default());
     let controller = browser.browser();
+    let preview = PreviewDrawer::new(Rc::new(LocalPreviewProvider));
+    let preview_for_selection = preview.clone();
+    let weak_controller = Rc::downgrade(&controller);
+    controller.observe(move |event| {
+        if !preview_for_selection.is_open() {
+            return;
+        }
+        if let BrowserEvent::FocusChanged {
+            depth,
+            position: Some(position),
+        } = event
+        {
+            if let Some(entry) = weak_controller
+                .upgrade()
+                .and_then(|browser| browser.entry_at(depth, position))
+            {
+                preview_for_selection.show(entry);
+            }
+        }
+    });
 
     let header = gtk::HeaderBar::new();
     header.set_show_title_buttons(false);
     header.set_title_widget(Some(&gtk::Box::new(gtk::Orientation::Horizontal, 0)));
     let sidebar_toggle = gtk::ToggleButton::builder()
-        .icon_name(crate::assets::icons::PANEL_LEFT)
         .active(true)
         .tooltip_text("Toggle sidebar")
         .build();
+    sidebar_toggle.set_child(Some(&crate::assets::primary_icon(
+        crate::assets::icons::PANEL_LEFT,
+        20,
+    )));
     sidebar_toggle.add_css_class("sidebar-toggle");
     header.pack_start(&sidebar_toggle);
     header.pack_start(&browser.location_widget());
-    let search_button = gtk::Button::builder()
-        .icon_name(crate::assets::icons::SEARCH)
-        .tooltip_text("Search")
-        .build();
+    let search_button = gtk::Button::builder().tooltip_text("Search").build();
+    search_button.set_child(Some(&crate::assets::primary_icon(
+        crate::assets::icons::SEARCH,
+        20,
+    )));
     search_button.add_css_class("header-action");
     let appearance = build_appearance_menu(&controller);
-    let settings = gtk::Button::builder()
-        .icon_name(crate::assets::icons::SETTINGS)
-        .tooltip_text("Settings")
-        .build();
+    let settings = gtk::Button::builder().tooltip_text("Settings").build();
+    settings.set_child(Some(&crate::assets::primary_icon(
+        crate::assets::icons::SETTINGS,
+        20,
+    )));
     settings.add_css_class("header-action");
-    let close_window = gtk::Button::builder()
-        .icon_name(crate::assets::icons::X)
-        .tooltip_text("Close window")
-        .build();
+    let close_window = gtk::Button::builder().tooltip_text("Close window").build();
+    close_window.set_child(Some(&crate::assets::primary_icon(
+        crate::assets::icons::X,
+        20,
+    )));
     close_window.add_css_class("header-action");
     let closing_window = window.clone();
     close_window.connect_clicked(move |_| closing_window.close());
@@ -100,7 +131,19 @@ pub fn present_location(application: &gtk::Application, location: Option<PathBuf
             toggle.is_active(),
         );
     });
-    root.append(&content);
+    let preview_split = gtk::Paned::new(gtk::Orientation::Horizontal);
+    preview_split.add_css_class("preview-split");
+    preview_split.set_wide_handle(false);
+    preview_split.set_resize_start_child(true);
+    preview_split.set_resize_end_child(false);
+    preview_split.set_shrink_start_child(false);
+    preview_split.set_shrink_end_child(true);
+    preview_split.set_start_child(Some(&content));
+    preview_split.set_end_child(Some(&preview.widget()));
+    preview_split.set_position(i32::MAX);
+    preview_split.set_vexpand(true);
+    preview.attach_split(&preview_split);
+    root.append(&preview_split);
 
     let window_overlay = gtk::Overlay::new();
     let blurred_root = BlurBin::new(&root);
@@ -128,7 +171,7 @@ pub fn present_location(application: &gtk::Application, location: Option<PathBuf
     });
     window.add_controller(settings_shortcut);
     window.set_child(Some(&window_overlay));
-    install_keyboard_navigation(&window, &browser, &sidebar_toggle);
+    install_keyboard_navigation(&window, &browser, &sidebar_toggle, &preview);
     browser.navigate(location.unwrap_or_else(home_directory));
 
     let browser_controller = browser.browser();
@@ -191,11 +234,13 @@ fn install_keyboard_navigation(
     window: &gtk::ApplicationWindow,
     view: &BrowserView,
     sidebar_toggle: &gtk::ToggleButton,
+    preview: &PreviewDrawer,
 ) {
     let keys = gtk::EventControllerKey::new();
     keys.set_propagation_phase(gtk::PropagationPhase::Capture);
     let view = view.clone();
     let sidebar_toggle = sidebar_toggle.clone();
+    let preview = preview.clone();
     let weak_browser = Rc::downgrade(&view.browser());
     keys.connect_key_pressed(move |_, key, _, modifiers| {
         let Some(browser) = weak_browser.upgrade() else {
@@ -223,6 +268,10 @@ fn install_keyboard_navigation(
         }
         if control && key == gtk::gdk::Key::h {
             browser.toggle_hidden();
+            return glib::Propagation::Stop;
+        }
+        if key == gtk::gdk::Key::space && !alt && !control {
+            preview.toggle(browser.focused_entry());
             return glib::Propagation::Stop;
         }
 
@@ -278,11 +327,14 @@ fn build_appearance_menu(controller: &Rc<Browser>) -> gtk::MenuButton {
         let shown = !hidden_state.get();
         hidden_state.set(shown);
         hidden_check.set_visible(shown);
-        hidden_icon.set_icon_name(Some(if shown {
-            crate::assets::icons::EYE
-        } else {
-            crate::assets::icons::EYE_OFF
-        }));
+        crate::assets::set_primary_icon(
+            &hidden_icon,
+            if shown {
+                crate::assets::icons::EYE
+            } else {
+                crate::assets::icons::EYE_OFF
+            },
+        );
         if let Some(controller) = weak_controller.upgrade() {
             controller.toggle_hidden();
         }
@@ -297,17 +349,21 @@ fn build_appearance_menu(controller: &Rc<Browser>) -> gtk::MenuButton {
         .build();
     popover.add_css_class("appearance-popover");
     let button = gtk::MenuButton::builder()
-        .icon_name(crate::assets::icons::LIST)
         .tooltip_text("Appearance")
         .popover(&popover)
         .build();
+    let icon = crate::assets::primary_icon(crate::assets::icons::LIST, 20);
+    button.set_child(Some(&icon));
     button.add_css_class("header-action");
-    button.connect_active_notify(|button| {
-        button.set_icon_name(if button.is_active() {
-            crate::assets::icons::LIST_ACTIVE
-        } else {
-            crate::assets::icons::LIST
-        });
+    button.connect_active_notify(move |button| {
+        crate::assets::set_primary_icon(
+            &icon,
+            if button.is_active() {
+                crate::assets::icons::LIST_ACTIVE
+            } else {
+                crate::assets::icons::LIST
+            },
+        );
     });
     button
 }
@@ -319,11 +375,9 @@ fn appearance_option(
     sensitive: bool,
 ) -> (gtk::Button, gtk::Image, gtk::Image) {
     let row = gtk::Box::new(gtk::Orientation::Horizontal, 10);
-    let check = gtk::Image::from_icon_name(crate::assets::icons::CHECK);
-    check.set_pixel_size(16);
+    let check = crate::assets::primary_icon(crate::assets::icons::CHECK, 16);
     check.set_visible(checked);
-    let option = gtk::Image::from_icon_name(icon);
-    option.set_pixel_size(17);
+    let option = crate::assets::primary_icon(icon, 17);
     let label = gtk::Label::new(Some(label));
     label.set_xalign(0.0);
     label.set_hexpand(true);
@@ -343,7 +397,6 @@ fn show_settings(layer: &gtk::Box, button: &gtk::Button, root: &BlurBin) {
     root.set_blurred(true);
     layer.set_visible(true);
     layer.grab_focus();
-    button.set_icon_name(crate::assets::icons::SETTINGS_ACTIVE);
     button.add_css_class("active");
 }
 

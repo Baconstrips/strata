@@ -210,14 +210,20 @@ impl BrowserView {
         location_error.set_visible(false);
         location_error.set_xalign(0.0);
         let confirm_location = gtk::Button::builder()
-            .icon_name(crate::assets::icons::CHECK)
             .tooltip_text("Navigate (Enter)")
             .build();
+        confirm_location.set_child(Some(&crate::assets::primary_icon(
+            crate::assets::icons::CHECK,
+            16,
+        )));
         confirm_location.add_css_class("location-action");
         let cancel_location = gtk::Button::builder()
-            .icon_name(crate::assets::icons::X)
             .tooltip_text("Cancel (Escape)")
             .build();
+        cancel_location.set_child(Some(&crate::assets::primary_icon(
+            crate::assets::icons::X,
+            16,
+        )));
         cancel_location.add_css_class("location-action");
         let entry_row = gtk::Box::new(gtk::Orientation::Horizontal, 4);
         entry_row.append(&location_entry);
@@ -451,10 +457,9 @@ impl ViewState {
                 current_label.add_css_class("breadcrumb");
                 current_label.add_css_class("current");
                 current_label.set_tooltip_text(Some(&crumb.display_path()));
-                let copy = gtk::Button::builder()
-                    .icon_name(crate::assets::icons::COPY)
-                    .tooltip_text("Copy path")
-                    .build();
+                let copy = gtk::Button::builder().tooltip_text("Copy path").build();
+                let copy_icon = crate::assets::primary_icon(crate::assets::icons::COPY, 16);
+                copy.set_child(Some(&copy_icon));
                 copy.add_css_class("copy-path");
                 copy.set_has_frame(false);
                 copy.set_cursor_from_name(Some("pointer"));
@@ -466,13 +471,14 @@ impl ViewState {
                     }
                     let generation = feedback_generation.get().saturating_add(1);
                     feedback_generation.set(generation);
-                    button.set_icon_name(crate::assets::icons::CHECK);
+                    crate::assets::set_primary_icon(&copy_icon, crate::assets::icons::CHECK);
                     button.set_tooltip_text(Some("Path copied"));
                     let button = button.clone();
+                    let copy_icon = copy_icon.clone();
                     let feedback_generation = feedback_generation.clone();
                     glib::timeout_add_local_once(Duration::from_secs(2), move || {
                         if feedback_generation.get() == generation {
-                            button.set_icon_name(crate::assets::icons::COPY);
+                            crate::assets::set_primary_icon(&copy_icon, crate::assets::icons::COPY);
                             button.set_tooltip_text(Some("Copy path"));
                         }
                     });
@@ -731,8 +737,7 @@ impl ViewState {
             .hexpand(true)
             .build();
         filter_entry.add_css_class("column-filter-entry");
-        let filter_icon = gtk::Image::from_icon_name(crate::assets::icons::FUNNEL);
-        filter_icon.set_pixel_size(16);
+        let filter_icon = crate::assets::primary_icon(crate::assets::icons::FUNNEL, 16);
         let filter_control = gtk::Box::new(gtk::Orientation::Horizontal, 7);
         filter_control.add_css_class("column-filter");
         filter_control.append(&filter_icon);
@@ -742,9 +747,12 @@ impl ViewState {
             .child(&filter_control)
             .build();
         let filter_button = gtk::ToggleButton::builder()
-            .icon_name(crate::assets::icons::FUNNEL)
             .tooltip_text("Filter this pane")
             .build();
+        filter_button.set_child(Some(&crate::assets::primary_icon(
+            crate::assets::icons::FUNNEL,
+            16,
+        )));
         filter_button.add_css_class("column-header-action");
         let shown_filter = filter_revealer.clone();
         let focused_filter = filter_entry.clone();
@@ -759,9 +767,12 @@ impl ViewState {
         header_actions.append(&filter_button);
         if depth > 0 {
             let close = gtk::Button::builder()
-                .icon_name(crate::assets::icons::X)
                 .tooltip_text("Close this pane")
                 .build();
+            close.set_child(Some(&crate::assets::primary_icon(
+                crate::assets::icons::X,
+                16,
+            )));
             close.add_css_class("column-header-action");
             let weak_browser = Rc::downgrade(&self.browser);
             close.connect_clicked(move |_| {
@@ -821,9 +832,8 @@ impl ViewState {
             let size = gtk::Label::new(None);
             size.add_css_class("file-size");
             size.set_xalign(1.0);
-            let chevron = gtk::Image::from_icon_name(crate::assets::icons::CHEVRON_RIGHT);
+            let chevron = crate::assets::primary_icon(crate::assets::icons::CHEVRON_RIGHT, 15);
             chevron.add_css_class("file-chevron");
-            chevron.set_pixel_size(15);
             row.append(&icon);
             row.append(&label);
             row.append(&size);
@@ -1243,9 +1253,8 @@ fn basic_label_factory() -> gtk::SignalListItemFactory {
             .hexpand(true)
             .ellipsize(gtk::pango::EllipsizeMode::End)
             .build();
-        let chevron = gtk::Image::from_icon_name(crate::assets::icons::CHEVRON_RIGHT);
+        let chevron = crate::assets::primary_icon(crate::assets::icons::CHEVRON_RIGHT, 15);
         chevron.add_css_class("file-chevron");
-        chevron.set_pixel_size(15);
         row.append(&icon);
         row.append(&label);
         row.append(&chevron);
@@ -1389,28 +1398,32 @@ fn column_sort_menu(browser: &Rc<Browser>, depth: usize) -> gtk::MenuButton {
         .build();
     popover.add_css_class("column-popover");
     let button = gtk::MenuButton::builder()
-        .icon_name(crate::assets::icons::SETTINGS_2)
         .tooltip_text("Choose sort field")
         .popover(&popover)
         .build();
+    button.set_child(Some(&crate::assets::primary_icon(
+        crate::assets::icons::SETTINGS_2,
+        16,
+    )));
     button.add_css_class("column-header-action");
     button
 }
 
 fn column_sort_direction_toggle(browser: &Rc<Browser>, depth: usize) -> gtk::ToggleButton {
     let button = gtk::ToggleButton::builder()
-        .icon_name(crate::assets::icons::ARROW_UP_NARROW_WIDE)
         .tooltip_text("Ascending — click to reverse")
         .build();
+    let icon = crate::assets::primary_icon(crate::assets::icons::ARROW_UP_NARROW_WIDE, 16);
+    button.set_child(Some(&icon));
     button.add_css_class("column-header-action");
     let weak_browser = Rc::downgrade(browser);
     button.connect_toggled(move |button| {
         let direction = if button.is_active() {
-            button.set_icon_name(crate::assets::icons::ARROW_DOWN_WIDE_NARROW);
+            crate::assets::set_primary_icon(&icon, crate::assets::icons::ARROW_DOWN_WIDE_NARROW);
             button.set_tooltip_text(Some("Descending — click to reverse"));
             SortDirection::Descending
         } else {
-            button.set_icon_name(crate::assets::icons::ARROW_UP_NARROW_WIDE);
+            crate::assets::set_primary_icon(&icon, crate::assets::icons::ARROW_UP_NARROW_WIDE);
             button.set_tooltip_text(Some("Ascending — click to reverse"));
             SortDirection::Ascending
         };
@@ -1423,8 +1436,7 @@ fn column_sort_direction_toggle(browser: &Rc<Browser>, depth: usize) -> gtk::Tog
 
 fn column_menu_option(label: &str, selected: bool) -> (gtk::Button, gtk::Image) {
     let row = gtk::Box::new(gtk::Orientation::Horizontal, 10);
-    let check = gtk::Image::from_icon_name(crate::assets::icons::CHECK);
-    check.set_pixel_size(16);
+    let check = crate::assets::primary_icon(crate::assets::icons::CHECK, 16);
     check.set_visible(selected);
     let label = gtk::Label::new(Some(label));
     label.set_xalign(0.0);

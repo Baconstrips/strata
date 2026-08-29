@@ -3,6 +3,7 @@
 mod blur;
 mod browser;
 mod motion;
+mod preview;
 mod settings;
 mod theme;
 mod window;

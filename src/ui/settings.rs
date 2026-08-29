@@ -50,9 +50,9 @@ pub fn build_layer(
     title.set_hexpand(true);
     title.add_css_class("settings-title");
     let close = gtk::Button::builder()
-        .icon_name(icons::X)
         .tooltip_text("Close settings")
         .build();
+    close.set_child(Some(&crate::assets::primary_icon(icons::X, 18)));
     close.add_css_class("settings-close");
     close.set_valign(gtk::Align::Center);
     titlebar.append(&title);
@@ -128,7 +128,6 @@ pub fn build_layer(
 fn hide(layer: &gtk::Box, button: &gtk::Button, root: &BlurBin) {
     layer.set_visible(false);
     root.set_blurred(false);
-    button.set_icon_name(icons::SETTINGS);
     button.remove_css_class("active");
 }
 
@@ -191,8 +190,7 @@ fn theme_page(manager: Rc<ThemeManager>) -> gtk::Widget {
         append_heading(&content, "SYSTEM");
         let system = gtk::Box::new(gtk::Orientation::Horizontal, 14);
         system.add_css_class("settings-option");
-        let icon = gtk::Image::from_icon_name(icons::MONITOR);
-        icon.set_pixel_size(22);
+        let icon = crate::assets::primary_icon(icons::MONITOR, 22);
         icon.add_css_class("system-theme-icon");
         let copy = gtk::Box::new(gtk::Orientation::Vertical, 2);
         copy.set_hexpand(true);
@@ -250,8 +248,7 @@ fn theme_page(manager: Rc<ThemeManager>) -> gtk::Widget {
     let add_content = gtk::Box::new(gtk::Orientation::Vertical, 7);
     add_content.set_halign(gtk::Align::Center);
     add_content.set_valign(gtk::Align::Center);
-    let plus = gtk::Image::from_icon_name(icons::PLUS);
-    plus.set_pixel_size(22);
+    let plus = crate::assets::primary_icon(icons::PLUS, 22);
     let add_label = gtk::Label::new(Some("Add a theme"));
     add_content.append(&plus);
     add_content.append(&add_label);
@@ -543,8 +540,7 @@ impl ColorField {
 
 fn navigation_button(icon: &str, label: &str) -> gtk::Button {
     let content = gtk::Box::new(gtk::Orientation::Horizontal, 10);
-    let icon = gtk::Image::from_icon_name(icon);
-    icon.set_pixel_size(18);
+    let icon = crate::assets::primary_icon(icon, 18);
     let label = gtk::Label::new(Some(label));
     label.set_xalign(0.0);
     content.append(&icon);

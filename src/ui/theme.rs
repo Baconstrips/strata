@@ -7,11 +7,12 @@ use std::{
     rc::Rc,
 };
 
-use gtk::{gdk, gio, prelude::*};
+use gtk::{gdk, gio, glib, prelude::*};
 use serde::{Deserialize, Serialize};
 
 thread_local! {
     static SHARED_MANAGER: RefCell<std::rc::Weak<ThemeManager>> = const { RefCell::new(std::rc::Weak::new()) };
+    static SOURCE_STYLE_PATH_INSTALLED: Cell<bool> = const { Cell::new(false) };
 }
 
 const BUILTIN_THEMES: [(&str, &str); 6] = [
@@ -261,6 +262,7 @@ impl ThemeManager {
     fn apply_tokens(&self, tokens: &ThemeTokens) {
         self.provider.load_from_string(&tokens_css(tokens));
         crate::assets::set_primary_icon_color(&tokens.accent);
+        install_source_style_scheme(tokens);
     }
 
     fn save_preferences(&self) {
@@ -411,6 +413,78 @@ fn validate_tokens(tokens: &ThemeTokens) -> Result<(), &'static str> {
         }
     }
     Ok(())
+}
+
+pub(super) fn source_style_scheme() -> Option<sourceview5::StyleScheme> {
+    sourceview5::StyleSchemeManager::default().scheme("strata-current")
+}
+
+fn install_source_style_scheme(tokens: &ThemeTokens) {
+    let directory = glib::user_cache_dir().join("strata").join("source-styles");
+    if let Err(error) = fs::create_dir_all(&directory).and_then(|()| {
+        fs::write(
+            directory.join("strata-current.xml"),
+            source_style_scheme_xml(tokens),
+        )
+    }) {
+        tracing::warn!(%error, "unable to write preview syntax style");
+        return;
+    }
+
+    let manager = sourceview5::StyleSchemeManager::default();
+    SOURCE_STYLE_PATH_INSTALLED.with(|installed| {
+        if !installed.replace(true) {
+            manager.append_search_path(&directory.to_string_lossy());
+        }
+    });
+    manager.force_rescan();
+}
+
+fn source_style_scheme_xml(tokens: &ThemeTokens) -> String {
+    let string = blend(&tokens.accent, &tokens.text, 0.48);
+    let constant = blend(&tokens.accent, &tokens.text, 0.18);
+    let type_color = blend(&tokens.accent, &tokens.text, 0.24);
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<style-scheme id="strata-current" _name="Strata Current Theme" version="1.0">
+  <color name="background" value="{}"/>
+  <color name="surface" value="{}"/>
+  <color name="text" value="{}"/>
+  <color name="accent" value="{}"/>
+  <color name="selection" value="{}"/>
+  <color name="dim" value="{}"/>
+  <color name="string" value="{}"/>
+  <color name="constant" value="{}"/>
+  <color name="type" value="{}"/>
+  <style name="text" foreground="text" background="surface"/>
+  <style name="selection" foreground="background" background="accent"/>
+  <style name="cursor" foreground="accent"/>
+  <style name="current-line" background="background"/>
+  <style name="line-numbers" foreground="dim" background="background"/>
+  <style name="def:comment" foreground="dim" italic="true"/>
+  <style name="def:shebang" foreground="dim" bold="true"/>
+  <style name="def:string" foreground="string"/>
+  <style name="def:constant" foreground="constant"/>
+  <style name="def:special-char" foreground="constant"/>
+  <style name="def:identifier" foreground="text"/>
+  <style name="def:statement" foreground="accent" bold="true"/>
+  <style name="def:type" foreground="type" bold="true"/>
+  <style name="def:preprocessor" foreground="type"/>
+  <style name="def:heading" foreground="accent" bold="true"/>
+  <style name="def:link-destination" foreground="string" underline="single"/>
+  <style name="def:error" foreground="background" background="accent" bold="true"/>
+</style-scheme>
+"#,
+        tokens.background,
+        tokens.surface,
+        tokens.text,
+        tokens.accent,
+        tokens.highlight,
+        tokens.dim_text,
+        string,
+        constant,
+        type_color,
+    )
 }
 
 fn tokens_css(tokens: &ThemeTokens) -> String {
