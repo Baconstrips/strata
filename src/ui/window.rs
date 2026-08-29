@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use std::{
-    cell::Cell,
+    cell::{Cell, RefCell},
     env,
     path::PathBuf,
     rc::Rc,
     time::{Duration, Instant},
 };
 
-use gtk::{glib, prelude::*};
+use gtk::{gio, glib, prelude::*};
 
 use crate::{
     adapters::LocalFileSource,
@@ -105,12 +105,12 @@ pub fn present_location(application: &gtk::Application, location: Option<PathBuf
     content.set_resize_start_child(false);
     content.set_position(SIDEBAR_WIDTH);
     content.set_vexpand(true);
-    let sidebar = build_sidebar(&browser.browser());
-    content.set_start_child(Some(&sidebar));
+    let sidebar = build_sidebar(browser.browser());
+    content.set_start_child(Some(&sidebar.widget));
     content.set_end_child(Some(&browser.widget()));
     let animation_generation = Rc::new(Cell::new(0));
     let animated_content = content.clone();
-    let animated_sidebar = sidebar.clone();
+    let animated_sidebar = sidebar.widget.clone();
     sidebar_toggle.connect_toggled(move |toggle| {
         animate_sidebar(
             &animated_content,
@@ -126,7 +126,10 @@ pub fn present_location(application: &gtk::Application, location: Option<PathBuf
     browser.navigate(location.unwrap_or_else(home_directory));
 
     let browser_controller = browser.browser();
-    window.connect_destroy(move |_| browser_controller.clear_observer());
+    window.connect_destroy(move |_| {
+        browser_controller.clear_observer();
+        sidebar.disconnect();
+    });
     window.present();
     crate::metrics::mark_window_presented();
 }
@@ -246,63 +249,251 @@ fn navigation_button(icon: &str, tooltip: &str) -> gtk::Button {
         .build()
 }
 
-fn build_sidebar(browser: &Rc<Browser>) -> gtk::Widget {
-    let sidebar = gtk::Box::new(gtk::Orientation::Vertical, 4);
-    sidebar.add_css_class("sidebar");
-    sidebar.set_size_request(SIDEBAR_WIDTH, -1);
+struct SidebarState {
+    widget: gtk::Box,
+    browser: Rc<Browser>,
+    volume_monitor: gio::VolumeMonitor,
+}
 
-    let heading = gtk::Label::new(Some("PLACES"));
-    heading.set_xalign(0.0);
-    heading.add_css_class("caption");
-    sidebar.append(&heading);
+struct SidebarView {
+    widget: gtk::Widget,
+    state: Rc<SidebarState>,
+    handlers: RefCell<Vec<glib::SignalHandlerId>>,
+}
 
-    let home = home_directory();
-    let mut places = vec![(crate::assets::icons::HOME, "Home", home)];
-    for (icon, name, directory) in [
-        (
-            crate::assets::icons::DOCUMENTS,
-            "Documents",
-            glib::UserDirectory::Documents,
-        ),
-        (
-            crate::assets::icons::DOWNLOADS,
-            "Downloads",
-            glib::UserDirectory::Downloads,
-        ),
-        (
-            crate::assets::icons::PICTURES,
-            "Pictures",
-            glib::UserDirectory::Pictures,
-        ),
-        (
-            crate::assets::icons::VIDEOS,
-            "Videos",
-            glib::UserDirectory::Videos,
-        ),
-    ] {
-        if let Some(path) = glib::user_special_dir(directory) {
-            places.push((icon, name, path));
+impl SidebarView {
+    fn disconnect(&self) {
+        for handler in self.handlers.take() {
+            self.state.volume_monitor.disconnect(handler);
+        }
+    }
+}
+
+impl SidebarState {
+    fn rebuild(self: &Rc<Self>) {
+        while let Some(child) = self.widget.first_child() {
+            self.widget.remove(&child);
+        }
+
+        self.append_place(
+            crate::assets::icons::HOME,
+            "Home",
+            Location::local(home_directory()),
+        );
+        self.append_place(
+            crate::assets::icons::TRASH,
+            "Trash",
+            Location::uri("trash:///"),
+        );
+        self.append_separator();
+
+        for (icon, name, directory) in [
+            (
+                crate::assets::icons::FOLDER,
+                "Desktop",
+                glib::UserDirectory::Desktop,
+            ),
+            (
+                crate::assets::icons::DOCUMENTS,
+                "Documents",
+                glib::UserDirectory::Documents,
+            ),
+            (
+                crate::assets::icons::DOWNLOADS,
+                "Downloads",
+                glib::UserDirectory::Downloads,
+            ),
+            (
+                crate::assets::icons::PICTURES,
+                "Pictures",
+                glib::UserDirectory::Pictures,
+            ),
+            (
+                crate::assets::icons::VIDEOS,
+                "Videos",
+                glib::UserDirectory::Videos,
+            ),
+        ] {
+            if let Some(path) = glib::user_special_dir(directory) {
+                self.append_place(icon, name, Location::local(path));
+            }
+        }
+
+        let volumes = self.volume_monitor.volumes();
+        let mounts: Vec<_> = self
+            .volume_monitor
+            .mounts()
+            .into_iter()
+            .filter(|mount| !mount.is_shadowed() && mount.volume().is_none())
+            .map(|mount| {
+                let root = mount.root();
+                let location = root
+                    .path()
+                    .map(Location::local)
+                    .unwrap_or_else(|| Location::uri(root.uri()));
+                (mount.name().to_string(), location)
+            })
+            .collect();
+        if !volumes.is_empty() || !mounts.is_empty() {
+            self.append_separator();
+            for volume in volumes {
+                self.append_volume(volume);
+            }
+            for (name, location) in mounts {
+                self.append_place(crate::assets::icons::HARD_DRIVE, &name, location);
+            }
         }
     }
 
-    for (icon, name, path) in places {
-        let row = gtk::Button::builder()
-            .icon_name(icon)
-            .label(name)
-            .halign(gtk::Align::Fill)
-            .build();
-        row.set_has_frame(false);
-
-        let weak_browser = Rc::downgrade(browser);
-        row.connect_clicked(move |_| {
-            if let Some(browser) = weak_browser.upgrade() {
-                browser.navigate(Location::local(path.clone()));
-            }
-        });
-        sidebar.append(&row);
+    fn append_separator(&self) {
+        let separator = gtk::Separator::new(gtk::Orientation::Horizontal);
+        separator.add_css_class("sidebar-separator");
+        self.widget.append(&separator);
     }
 
-    sidebar.upcast()
+    fn append_volume(&self, volume: gio::Volume) {
+        let name = volume.name().to_string();
+        let row = sidebar_button(crate::assets::icons::HARD_DRIVE, &name);
+        row.set_tooltip_text(Some(&name));
+        let weak_browser = Rc::downgrade(&self.browser);
+        row.connect_clicked(move |button| {
+            let Some(browser) = weak_browser.upgrade() else {
+                return;
+            };
+            if let Some(mount) = volume.get_mount() {
+                navigate_to_gio_file(&browser, &mount.root());
+                return;
+            }
+
+            let window = button.root().and_downcast::<gtk::Window>();
+            let operation = gtk::MountOperation::new(window.as_ref());
+            let volume = volume.clone();
+            glib::MainContext::default().spawn_local(async move {
+                match volume
+                    .mount_future(gio::MountMountFlags::NONE, Some(&operation))
+                    .await
+                {
+                    Ok(()) => {
+                        if let Some(mount) = volume.get_mount() {
+                            navigate_to_gio_file(&browser, &mount.root());
+                        }
+                    }
+                    Err(error) => {
+                        let dialog = gtk::AlertDialog::builder()
+                            .modal(true)
+                            .message("Unable to mount volume")
+                            .detail(error.to_string())
+                            .build();
+                        dialog.show(window.as_ref());
+                    }
+                }
+            });
+        });
+        self.widget.append(&row);
+    }
+
+    fn append_place(&self, icon: &str, name: &str, location: Location) {
+        let row = sidebar_button(icon, name);
+        row.set_tooltip_text(Some(&location.display_path()));
+        let weak_browser = Rc::downgrade(&self.browser);
+        row.connect_clicked(move |_| {
+            if let Some(browser) = weak_browser.upgrade() {
+                browser.navigate(location.clone());
+            }
+        });
+        self.widget.append(&row);
+    }
+}
+
+fn sidebar_button(icon: &str, name: &str) -> gtk::Button {
+    let content = gtk::Box::new(gtk::Orientation::Horizontal, 10);
+    let image = gtk::Image::from_icon_name(icon);
+    image.set_pixel_size(18);
+    let label = gtk::Label::new(Some(name));
+    label.set_xalign(0.0);
+    label.set_hexpand(true);
+    label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    content.append(&image);
+    content.append(&label);
+
+    let row = gtk::Button::builder()
+        .child(&content)
+        .halign(gtk::Align::Fill)
+        .build();
+    row.add_css_class("sidebar-row");
+    row.set_has_frame(false);
+    row
+}
+
+fn navigate_to_gio_file(browser: &Rc<Browser>, file: &gio::File) {
+    let location = file
+        .path()
+        .map(Location::local)
+        .unwrap_or_else(|| Location::uri(file.uri()));
+    browser.navigate(location);
+}
+
+fn build_sidebar(browser: Rc<Browser>) -> SidebarView {
+    let widget = gtk::Box::new(gtk::Orientation::Vertical, 2);
+    widget.add_css_class("sidebar");
+    let scroller = gtk::ScrolledWindow::builder()
+        .child(&widget)
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .vscrollbar_policy(gtk::PolicyType::Automatic)
+        .width_request(SIDEBAR_WIDTH)
+        .build();
+    scroller.add_css_class("sidebar-scroll");
+    let volume_monitor = gio::VolumeMonitor::get();
+    let state = Rc::new(SidebarState {
+        widget,
+        browser,
+        volume_monitor,
+    });
+
+    let mut handlers = Vec::new();
+    let weak = Rc::downgrade(&state);
+    handlers.push(state.volume_monitor.connect_mount_added(move |_, _| {
+        if let Some(state) = weak.upgrade() {
+            state.rebuild();
+        }
+    }));
+    let weak = Rc::downgrade(&state);
+    handlers.push(state.volume_monitor.connect_mount_removed(move |_, _| {
+        if let Some(state) = weak.upgrade() {
+            state.rebuild();
+        }
+    }));
+    let weak = Rc::downgrade(&state);
+    handlers.push(state.volume_monitor.connect_mount_changed(move |_, _| {
+        if let Some(state) = weak.upgrade() {
+            state.rebuild();
+        }
+    }));
+    let weak = Rc::downgrade(&state);
+    handlers.push(state.volume_monitor.connect_volume_added(move |_, _| {
+        if let Some(state) = weak.upgrade() {
+            state.rebuild();
+        }
+    }));
+    let weak = Rc::downgrade(&state);
+    handlers.push(state.volume_monitor.connect_volume_removed(move |_, _| {
+        if let Some(state) = weak.upgrade() {
+            state.rebuild();
+        }
+    }));
+    let weak = Rc::downgrade(&state);
+    handlers.push(state.volume_monitor.connect_volume_changed(move |_, _| {
+        if let Some(state) = weak.upgrade() {
+            state.rebuild();
+        }
+    }));
+    state.rebuild();
+
+    SidebarView {
+        widget: scroller.upcast(),
+        state,
+        handlers: RefCell::new(handlers),
+    }
 }
 
 fn home_directory() -> PathBuf {

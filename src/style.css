@@ -71,14 +71,44 @@ headerbar .sidebar-toggle:checked {
   margin: 2px 6px 0;
 }
 
+.sidebar-scroll,
+.sidebar-scroll viewport {
+  background: #0b1216;
+}
+
 .sidebar {
   background: #0b1216;
   border-right: 1px solid alpha(#8bc9eb, 0.14);
-  padding: 12px;
+  padding: 10px 8px;
 }
 
-.sidebar button {
-  padding: 8px 10px;
+.sidebar-row {
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  box-shadow: none;
+  color: #d6e2ee;
+  min-height: 36px;
+  padding: 7px 10px;
+}
+
+.sidebar-row:hover {
+  background: alpha(#304860, 0.38);
+}
+
+.sidebar-row:focus {
+  outline: 1px solid #22d3ee;
+  outline-offset: -1px;
+}
+
+.sidebar-row image {
+  color: #8bc9eb;
+}
+
+.sidebar-separator {
+  background: alpha(#8bc9eb, 0.14);
+  margin: 8px 4px;
+  min-height: 1px;
 }
 
 .columns {

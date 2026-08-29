@@ -1,37 +1,106 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use std::{ffi::OsString, path::PathBuf};
+use std::{cmp::Ordering, ffi::OsString, path::PathBuf};
 
-/// A browsable destination. Paths remain native and are only converted for display.
+/// A browsable destination. Native paths remain byte-safe and URI locations remain explicit.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+enum LocationKind {
+    Native(PathBuf),
+    Uri(String),
+}
+
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct Location {
-    path: PathBuf,
+    kind: LocationKind,
 }
 
 impl Location {
     pub fn local(path: impl Into<PathBuf>) -> Self {
-        Self { path: path.into() }
+        Self {
+            kind: LocationKind::Native(path.into()),
+        }
     }
 
-    pub fn path(&self) -> &std::path::Path {
-        &self.path
+    pub fn uri(uri: impl Into<String>) -> Self {
+        Self {
+            kind: LocationKind::Uri(uri.into()),
+        }
+    }
+
+    pub fn native_path(&self) -> Option<&std::path::Path> {
+        match &self.kind {
+            LocationKind::Native(path) => Some(path),
+            LocationKind::Uri(_) => None,
+        }
+    }
+
+    pub fn uri_value(&self) -> Option<&str> {
+        match &self.kind {
+            LocationKind::Native(_) => None,
+            LocationKind::Uri(uri) => Some(uri),
+        }
+    }
+
+    pub fn parent(&self) -> Option<Self> {
+        let path = self.native_path()?;
+        let parent = path.parent()?;
+        (parent != path).then(|| Self::local(parent))
+    }
+
+    pub fn is_absolute_native(&self) -> bool {
+        self.native_path().is_some_and(std::path::Path::is_absolute)
+    }
+
+    pub fn rebase(&self, from: &Self, to: &Self) -> Option<Self> {
+        let suffix = self.native_path()?.strip_prefix(from.native_path()?).ok()?;
+        Some(Self::local(to.native_path()?.join(suffix)))
+    }
+
+    pub fn is_within(&self, other: &Self) -> bool {
+        self.native_path()
+            .zip(other.native_path())
+            .is_some_and(|(path, parent)| path.starts_with(parent))
+    }
+
+    pub fn compare(&self, other: &Self) -> Ordering {
+        match (&self.kind, &other.kind) {
+            (LocationKind::Native(left), LocationKind::Native(right)) => left.cmp(right),
+            (LocationKind::Uri(left), LocationKind::Uri(right)) => left.cmp(right),
+            (LocationKind::Native(_), LocationKind::Uri(_)) => Ordering::Less,
+            (LocationKind::Uri(_), LocationKind::Native(_)) => Ordering::Greater,
+        }
     }
 
     /// Returns a UTF-8-safe representation without changing the native path.
     pub fn display_path(&self) -> String {
-        self.path.to_string_lossy().into_owned()
+        match &self.kind {
+            LocationKind::Native(path) => path.to_string_lossy().into_owned(),
+            LocationKind::Uri(uri) => uri.clone(),
+        }
     }
 
     pub fn display_name(&self) -> String {
-        self.path
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-            .filter(|name| !name.is_empty())
-            .unwrap_or_else(|| self.path.to_string_lossy().into_owned())
+        match &self.kind {
+            LocationKind::Native(path) => path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .filter(|name| !name.is_empty())
+                .unwrap_or_else(|| path.to_string_lossy().into_owned()),
+            LocationKind::Uri(uri) if uri == "trash:///" => "Trash".into(),
+            LocationKind::Uri(uri) => uri
+                .trim_end_matches('/')
+                .rsplit('/')
+                .next()
+                .unwrap_or(uri)
+                .into(),
+        }
     }
 
     pub fn breadcrumbs(&self) -> Vec<Self> {
-        let mut locations: Vec<_> = self.path.ancestors().map(Self::local).collect();
+        let Some(path) = self.native_path() else {
+            return vec![self.clone()];
+        };
+        let mut locations: Vec<_> = path.ancestors().map(Self::local).collect();
         locations.reverse();
         locations
     }

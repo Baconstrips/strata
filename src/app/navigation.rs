@@ -61,11 +61,7 @@ impl NavigationPath {
         }
 
         let current = self.locations.first()?;
-        let parent = current.path().parent()?;
-        if parent == current.path() {
-            return None;
-        }
-        Some(Self::from_locations(vec![Location::local(parent)]))
+        Some(Self::from_locations(vec![current.parent()?]))
     }
 }
 
@@ -168,10 +164,10 @@ impl NavigationState {
             DirectoryChange::Move { from, entry } => {
                 let mut changed = false;
                 for location in locations.iter_mut().skip(origin_depth + 1) {
-                    let Ok(suffix) = location.path().strip_prefix(from.path()) else {
+                    let Some(rebased) = location.rebase(from, &entry.location) else {
                         continue;
                     };
-                    *location = Location::local(entry.location.path().join(suffix));
+                    *location = rebased;
                     changed = true;
                 }
                 changed.then(|| NavigationPath::from_locations(locations))
@@ -181,7 +177,7 @@ impl NavigationState {
                     .iter()
                     .enumerate()
                     .skip(origin_depth + 1)
-                    .find(|(_, location)| location.path().starts_with(removed.path()))
+                    .find(|(_, location)| location.is_within(removed))
                     .map(|(depth, _)| depth)?;
                 locations.truncate(affected);
                 Some(NavigationPath::from_locations(locations))
@@ -595,7 +591,7 @@ fn compare_entries(left: &FileEntry, right: &FileEntry, preferences: ViewPrefere
     };
     ordering
         .then_with(|| left.display_name.cmp(&right.display_name))
-        .then_with(|| left.location.path().cmp(right.location.path()))
+        .then_with(|| left.location.compare(&right.location))
 }
 
 fn compare_metadata<T: Ord>(left: &MetadataValue<T>, right: &MetadataValue<T>) -> Ordering {

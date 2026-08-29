@@ -5,3 +5,8 @@
 - Do not place test implementations inline with production code.
 - Put module unit tests in an adjacent test module, such as `src/app/navigation/tests.rs`, and declare it from the implementation with `#[cfg(test)] mod tests;`.
 - Use the top-level `tests/` directory for integration tests that exercise the crate through its public API.
+
+## Icons
+
+- Add new interface icons only from the Lucide icon set.
+- Keep Lucide geometry intact, namespace bundled assets with `strata-`, and preserve the ISC attribution in `THIRD_PARTY_LICENSES.md`.

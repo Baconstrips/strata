@@ -118,8 +118,14 @@ impl Browser {
         let location = self
             .active_location()
             .filter(|current| current.display_path() == input)
-            .unwrap_or_else(|| Location::local(PathBuf::from(input)));
-        if !location.path().is_absolute() {
+            .unwrap_or_else(|| {
+                if input == "trash:///" {
+                    Location::uri(input)
+                } else {
+                    Location::local(PathBuf::from(input))
+                }
+            });
+        if location.native_path().is_some() && !location.is_absolute_native() {
             return Err(LocationValidationError::NotAbsolute);
         }
         self.source.validate_location(&location)?;
@@ -518,7 +524,7 @@ impl Browser {
                 if let Some((depth, insertions)) = application {
                     tracing::debug!(
                         request_id = request_id.0,
-                        location = %state.columns[depth].location.path().display(),
+                        location = %state.columns[depth].location.display_path(),
                         entries = entries.len(),
                         "directory batch accepted"
                     );

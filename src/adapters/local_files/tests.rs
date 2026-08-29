@@ -58,10 +58,10 @@ fn invalid_utf8_names_keep_their_native_bytes() -> Result<(), Box<dyn Error>> {
         gio::FileQueryInfoFlags::NONE,
         None::<&gio::Cancellable>,
     )?;
-    let entry = entry_from_info(path.clone(), info);
+    let entry = entry_from_info(Location::local(path.clone()), info);
 
     assert_eq!(entry.native_name.as_bytes(), native_name.as_bytes());
-    assert_eq!(entry.location.path(), path);
+    assert_eq!(entry.location.native_path(), Some(path.as_path()));
     assert!(!entry.display_name.is_empty());
 
     fs::remove_dir_all(directory)?;
@@ -90,7 +90,7 @@ fn symlink_targets_and_broken_links_are_distinguished() -> Result<(), Box<dyn Er
             gio::FileQueryInfoFlags::NONE,
             None::<&gio::Cancellable>,
         )?;
-        Ok(entry_from_info(path, info).kind)
+        Ok(entry_from_info(Location::local(path), info).kind)
     };
 
     assert_eq!(kind("directory-link")?, EntryKind::DirectorySymbolicLink);

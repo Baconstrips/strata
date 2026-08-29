@@ -111,7 +111,7 @@ Legend: **P0** blocks the milestone, **P1** is required for its exit criteria, *
 ### Sidebar
 
 - [x] **P0** Resolve standard user directories instead of assuming English folder names
-- [ ] **P0** Add mounted volumes and Trash
+- [x] **P0** Add mounted volumes and Trash
 - [ ] **P1** Add, remove, activate, and reorder bookmarks
 - [x] **P1** Collapse sidebar with mouse and keyboard
 - [ ] **P1** Persist sidebar state and bookmarks

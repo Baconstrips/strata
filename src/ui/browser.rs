@@ -545,7 +545,7 @@ impl ViewState {
                 }
             }
             BrowserEvent::OpenRequested { location } => {
-                open_file(location.path(), &self.overlay);
+                open_location(&location, &self.overlay);
             }
             BrowserEvent::NavigationRejected { message } => {
                 show_error_dialog(&self.overlay, "Unable to open directory", &message);
@@ -564,7 +564,7 @@ impl ViewState {
         let heading = gtk::Label::new(Some(&location.display_name()));
         heading.set_xalign(0.0);
         heading.set_hexpand(true);
-        heading.set_tooltip_text(Some(&location.path().to_string_lossy()));
+        heading.set_tooltip_text(Some(&location.display_path()));
         let spinner = gtk::Spinner::new();
         spinner.start();
         header.append(&heading);
@@ -1061,10 +1061,14 @@ fn animate_horizontal_scroll(
     });
 }
 
-fn open_file(path: &Path, parent: &impl IsA<gtk::Widget>) {
-    let uri = gio::File::for_path(path).uri();
+fn open_location(location: &Location, parent: &impl IsA<gtk::Widget>) {
+    let file = location
+        .native_path()
+        .map(gio::File::for_path)
+        .unwrap_or_else(|| gio::File::for_uri(location.uri_value().unwrap_or_default()));
+    let uri = file.uri();
     if let Err(error) = gio::AppInfo::launch_default_for_uri(&uri, None::<&gio::AppLaunchContext>) {
-        tracing::warn!(path = %path.display(), error = %error, "unable to open file");
+        tracing::warn!(location = %location.display_path(), error = %error, "unable to open file");
         show_error_dialog(parent, "Unable to open file", &error.to_string());
     }
 }

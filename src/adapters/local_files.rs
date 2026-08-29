@@ -40,7 +40,13 @@ fn map_validation_error(error: std::io::Error) -> LocationValidationError {
     }
 }
 
-fn entry_from_info(path: PathBuf, info: gio::FileInfo) -> FileEntry {
+fn location_for_file(file: &gio::File) -> Location {
+    file.path()
+        .map(Location::local)
+        .unwrap_or_else(|| Location::uri(file.uri()))
+}
+
+fn entry_from_info(location: Location, info: gio::FileInfo) -> FileEntry {
     let native_name = info.name().into_os_string();
     let kind = match (info.file_type(), info.is_symlink()) {
         (gio::FileType::Directory, true) => EntryKind::DirectorySymbolicLink,
@@ -51,7 +57,7 @@ fn entry_from_info(path: PathBuf, info: gio::FileInfo) -> FileEntry {
         _ => EntryKind::Other,
     };
     FileEntry {
-        location: Location::local(path),
+        location,
         native_name,
         display_name: info.display_name().to_string(),
         kind,
@@ -74,23 +80,46 @@ fn entry_from_info(path: PathBuf, info: gio::FileInfo) -> FileEntry {
 
 impl FileSource for LocalFileSource {
     fn validate_location(&self, location: &Location) -> Result<(), LocationValidationError> {
-        let metadata = std::fs::metadata(location.path()).map_err(map_validation_error)?;
-        if !metadata.is_dir() {
+        if let Some(path) = location.native_path() {
+            let metadata = std::fs::metadata(path).map_err(map_validation_error)?;
+            if !metadata.is_dir() {
+                return Err(LocationValidationError::NotDirectory);
+            }
+            return std::fs::read_dir(path)
+                .map(|_| ())
+                .map_err(map_validation_error);
+        }
+
+        let file = gio::File::for_uri(
+            location
+                .uri_value()
+                .ok_or_else(|| LocationValidationError::Unavailable("invalid URI".into()))?,
+        );
+        let info = file
+            .query_info(
+                "standard::type",
+                gio::FileQueryInfoFlags::NONE,
+                None::<&gio::Cancellable>,
+            )
+            .map_err(|error| LocationValidationError::Unavailable(error.to_string()))?;
+        if info.file_type() != gio::FileType::Directory {
             return Err(LocationValidationError::NotDirectory);
         }
-        std::fs::read_dir(location.path())
-            .map(|_| ())
-            .map_err(map_validation_error)
+        Ok(())
     }
 
     fn enumerate(&self, request: DirectoryRequest, emit: Rc<dyn Fn(DirectoryEvent)>) -> LoadHandle {
         let request_id = request.id;
-        let path = request.location.path().to_path_buf();
+        let location = request.location.clone();
+        let display_location = location.display_path();
         let started = Instant::now();
-        tracing::info!(request_id = request_id.0, path = %path.display(), "directory load started");
+        tracing::info!(request_id = request_id.0, location = %display_location, "directory load started");
 
         let task = glib::MainContext::default().spawn_local(async move {
-            let directory = gio::File::for_path(&path);
+            let directory = location
+                .native_path()
+                .map(gio::File::for_path)
+                .unwrap_or_else(|| gio::File::for_uri(location.uri_value().unwrap_or_default()));
             let enumerator = match directory
                 .enumerate_children_future(
                     ATTRIBUTES,
@@ -132,8 +161,8 @@ impl FileSource for LocalFileSource {
                             .into_iter()
                             .filter(|info| request.include_hidden || !info.is_hidden())
                             .map(|info| {
-                                let entry_path = path.join(info.name());
-                                entry_from_info(entry_path, info)
+                                let child = directory.child(info.name());
+                                entry_from_info(location_for_file(&child), info)
                             })
                             .collect();
                         total_entries += entries.len();
@@ -175,7 +204,8 @@ impl FileSource for LocalFileSource {
         include_hidden: bool,
         notify: Rc<dyn Fn(DirectoryChange)>,
     ) -> Option<LoadHandle> {
-        let file = gio::File::for_path(location.path());
+        let path = location.native_path()?.to_path_buf();
+        let file = gio::File::for_path(&path);
         let monitor = match file.monitor_directory(
             gio::FileMonitorFlags::WATCH_MOVES,
             None::<&gio::Cancellable>,
@@ -183,7 +213,7 @@ impl FileSource for LocalFileSource {
             Ok(monitor) => monitor,
             Err(error) => {
                 tracing::warn!(
-                    path = %location.path().display(),
+                    path = %path.display(),
                     error = %error,
                     "directory monitoring unavailable"
                 );
@@ -345,7 +375,7 @@ fn query_monitored_entry(
         }
         match result {
             Ok(info) if include_hidden || !info.is_hidden() => {
-                let entry = entry_from_info(path, info);
+                let entry = entry_from_info(Location::local(path), info);
                 if let Some(from) = moved_from {
                     notify(DirectoryChange::Move {
                         from: Location::local(from),

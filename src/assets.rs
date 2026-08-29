@@ -10,13 +10,16 @@ use std::{
 use gtk::{gdk, gio, glib};
 
 pub mod icons {
-    pub const DOCUMENTS: &str = "strata-file-text-symbolic";
-    pub const DOWNLOADS: &str = "strata-download-symbolic";
-    pub const HOME: &str = "strata-house-symbolic";
+    pub const DOCUMENTS: &str = "strata-file-text";
+    pub const DOWNLOADS: &str = "strata-download";
+    pub const FOLDER: &str = "strata-folder";
+    pub const HARD_DRIVE: &str = "strata-hard-drive";
+    pub const HOME: &str = "strata-house";
     pub const PANEL_LEFT: &str = "strata-panel-left-symbolic";
-    pub const PICTURES: &str = "strata-image-symbolic";
+    pub const PICTURES: &str = "strata-image";
     pub const SEARCH: &str = "strata-search-symbolic";
-    pub const VIDEOS: &str = "strata-video-symbolic";
+    pub const TRASH: &str = "strata-trash";
+    pub const VIDEOS: &str = "strata-video";
 }
 
 const FONT_VERSION: &str = "2.304";
