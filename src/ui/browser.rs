@@ -57,6 +57,7 @@ struct ActiveRename {
     entry: FileEntry,
     field: gtk::Entry,
     label: gtk::Label,
+    spacer: gtk::Box,
 }
 
 struct PeekView {
@@ -441,11 +442,15 @@ impl ViewState {
         let Some(field) = label.next_sibling().and_downcast::<gtk::Entry>() else {
             return false;
         };
+        let Some(spacer) = field.next_sibling().and_downcast::<gtk::Box>() else {
+            return false;
+        };
         field.remove_css_class("error");
         field.set_tooltip_text(None);
         field.set_sensitive(true);
         field.set_text(&entry.display_name);
         label.set_visible(false);
+        spacer.set_visible(false);
         field.set_visible(true);
         field.grab_focus();
         field.select_region(0, rename_stem_end(&entry.display_name));
@@ -453,6 +458,7 @@ impl ViewState {
             entry,
             field,
             label,
+            spacer,
         }));
         true
     }
@@ -466,6 +472,7 @@ impl ViewState {
         rename.field.set_visible(false);
         rename.field.set_sensitive(true);
         rename.label.set_visible(true);
+        rename.spacer.set_visible(true);
         true
     }
 
@@ -1002,7 +1009,8 @@ impl ViewState {
             let label = gtk::Label::builder()
                 .halign(gtk::Align::Fill)
                 .xalign(0.0)
-                .hexpand(true)
+                .hexpand(false)
+                .max_width_chars(24)
                 .ellipsize(gtk::pango::EllipsizeMode::End)
                 .build();
             let rename = gtk::Entry::new();
@@ -1015,6 +1023,9 @@ impl ViewState {
                     state.submit_rename(field);
                 }
             });
+            let spacer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+            spacer.add_css_class("file-row-spacer");
+            spacer.set_hexpand(true);
             let size = gtk::Label::new(None);
             size.add_css_class("file-size");
             size.set_xalign(1.0);
@@ -1023,6 +1034,7 @@ impl ViewState {
             row.append(&icon);
             row.append(&label);
             row.append(&rename);
+            row.append(&spacer);
             row.append(&size);
             row.append(&chevron);
             let motion = gtk::EventControllerMotion::new();
@@ -1140,7 +1152,10 @@ impl ViewState {
             let Some(rename) = label.next_sibling().and_downcast::<gtk::Entry>() else {
                 return;
             };
-            let Some(size) = rename.next_sibling().and_downcast::<gtk::Label>() else {
+            let Some(spacer) = rename.next_sibling().and_downcast::<gtk::Box>() else {
+                return;
+            };
+            let Some(size) = spacer.next_sibling().and_downcast::<gtk::Label>() else {
                 return;
             };
             let Some(chevron) = size.next_sibling().and_downcast::<gtk::Image>() else {
@@ -1149,6 +1164,7 @@ impl ViewState {
             label.set_label(model_display_name(&value.string()));
             rename.set_visible(false);
             label.set_visible(true);
+            spacer.set_visible(true);
             let source_position =
                 source_position_for_filtered(&source_for_bind, &filtered_for_bind, item.position());
             let browser = weak_browser_for_bind.upgrade();
@@ -1213,8 +1229,12 @@ impl ViewState {
                 .widget()
                 .and_then(|widget| widget.pick(x, y, gtk::PickFlags::DEFAULT))
                 .is_some_and(is_file_row_target);
-            active_for_begin.set(!starts_on_row);
-            if starts_on_row {
+            let force_marquee = gesture
+                .current_event_state()
+                .contains(gtk::gdk::ModifierType::ALT_MASK);
+            let can_start = force_marquee || !starts_on_row;
+            active_for_begin.set(can_start);
+            if !can_start {
                 return;
             }
             gesture.set_state(gtk::EventSequenceState::Claimed);
@@ -1294,8 +1314,6 @@ impl ViewState {
             active_for_end.set(false);
             marquee_box_for_end.set_visible(false);
         });
-        list.add_controller(marquee);
-
         let clear_selection = gtk::GestureClick::new();
         clear_selection.set_button(1);
         let background_press = Rc::new(Cell::new((0.0, 0.0)));
@@ -1307,15 +1325,15 @@ impl ViewState {
             if (x - start_x).abs() > 3.0 || (y - start_y).abs() > 3.0 {
                 return;
             }
-            let clicked_row = gesture
+            let target = gesture
                 .widget()
-                .and_then(|widget| widget.pick(x, y, gtk::PickFlags::DEFAULT))
-                .is_some_and(is_file_row_target);
-            if !clicked_row {
+                .and_then(|widget| widget.pick(x, y, gtk::PickFlags::DEFAULT));
+            if !target.is_some_and(is_file_row_target) {
                 selection_for_background.unselect_all();
                 mouse_selection_anchor_for_background.set(None);
             }
         });
+        list.add_controller(marquee);
         list.add_controller(clear_selection);
         let selection_keys = gtk::EventControllerKey::new();
         selection_keys.set_propagation_phase(gtk::PropagationPhase::Capture);

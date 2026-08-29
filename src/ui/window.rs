@@ -24,6 +24,7 @@ use super::{
 };
 
 const SIDEBAR_WIDTH: i32 = 208;
+const MIN_SIDEBAR_WIDTH: i32 = 176;
 const SIDEBAR_TRANSITION: Duration = Duration::from_millis(300);
 
 pub fn present(application: &gtk::Application) {
@@ -116,14 +117,27 @@ pub fn present_location(application: &gtk::Application, location: Option<PathBuf
 
     let content = gtk::Paned::new(gtk::Orientation::Horizontal);
     content.set_wide_handle(false);
-    content.set_shrink_start_child(true);
+    content.set_shrink_start_child(false);
     content.set_resize_start_child(false);
     content.set_position(SIDEBAR_WIDTH);
     content.set_vexpand(true);
     let sidebar = build_sidebar(browser.browser());
+    sidebar.widget.set_size_request(MIN_SIDEBAR_WIDTH, -1);
     content.set_start_child(Some(&sidebar.widget));
     content.set_end_child(Some(&browser.widget()));
     let animation_generation = Rc::new(Cell::new(0));
+    let sidebar_animating = Rc::new(Cell::new(false));
+    let constrained_content = content.clone();
+    let constrained_toggle = sidebar_toggle.clone();
+    let constrained_animation = sidebar_animating.clone();
+    content.connect_position_notify(move |_| {
+        if constrained_toggle.is_active()
+            && !constrained_animation.get()
+            && constrained_content.position() < MIN_SIDEBAR_WIDTH
+        {
+            constrained_content.set_position(MIN_SIDEBAR_WIDTH);
+        }
+    });
     let animated_content = content.clone();
     let animated_sidebar = sidebar.widget.clone();
     sidebar_toggle.connect_toggled(move |toggle| {
@@ -131,6 +145,7 @@ pub fn present_location(application: &gtk::Application, location: Option<PathBuf
             &animated_content,
             &animated_sidebar,
             &animation_generation,
+            &sidebar_animating,
             toggle.is_active(),
         );
     });
@@ -195,10 +210,13 @@ fn animate_sidebar(
     paned: &gtk::Paned,
     sidebar: &gtk::Widget,
     generation: &Rc<Cell<u64>>,
+    animating: &Rc<Cell<bool>>,
     expanded: bool,
 ) {
     let animation_id = generation.get().saturating_add(1);
     generation.set(animation_id);
+    animating.set(true);
+    paned.set_shrink_start_child(true);
     let target = if expanded { SIDEBAR_WIDTH } else { 0 };
     let start = paned.position();
     if expanded {
@@ -208,6 +226,8 @@ fn animate_sidebar(
     if !animations_enabled() || start == target {
         paned.set_position(target);
         sidebar.set_visible(expanded);
+        paned.set_shrink_start_child(!expanded);
+        animating.set(false);
         return;
     }
 
@@ -215,6 +235,7 @@ fn animate_sidebar(
     let paned = paned.clone();
     let sidebar = sidebar.clone();
     let generation = generation.clone();
+    let animating = animating.clone();
     let _tick = paned.clone().add_tick_callback(move |_, _| {
         if generation.get() != animation_id {
             return glib::ControlFlow::Break;
@@ -231,6 +252,8 @@ fn animate_sidebar(
             if !expanded {
                 sidebar.set_visible(false);
             }
+            paned.set_shrink_start_child(!expanded);
+            animating.set(false);
             glib::ControlFlow::Break
         } else {
             glib::ControlFlow::Continue
