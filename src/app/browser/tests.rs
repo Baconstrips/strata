@@ -12,6 +12,10 @@ struct FakeFileSource;
 
 struct RejectingFileSource;
 
+struct RetryFileSource {
+    attempts: Rc<Cell<usize>>,
+}
+
 struct TrackingFileSource {
     cancellations: Rc<Cell<usize>>,
 }
@@ -87,6 +91,39 @@ impl FileSource for TrackingFileSource {
     }
 }
 
+impl FileSource for RetryFileSource {
+    fn validate_location(&self, _location: &Location) -> Result<(), LocationValidationError> {
+        Ok(())
+    }
+
+    fn enumerate(&self, request: DirectoryRequest, emit: Rc<dyn Fn(DirectoryEvent)>) -> LoadHandle {
+        let attempt = self.attempts.get();
+        self.attempts.set(attempt + 1);
+        if attempt == 0 {
+            emit(DirectoryEvent::Failed {
+                request_id: request.id,
+                message: "temporarily unavailable".into(),
+            });
+        } else {
+            emit(DirectoryEvent::Batch {
+                request_id: request.id,
+                entries: vec![FileEntry {
+                    location: Location::local("/fixture/recovered"),
+                    native_name: OsString::from("recovered"),
+                    display_name: "recovered".into(),
+                    kind: EntryKind::Directory,
+                    size: MetadataValue::Unknown,
+                    modified_unix_seconds: MetadataValue::Unknown,
+                }],
+            });
+            emit(DirectoryEvent::Finished {
+                request_id: request.id,
+            });
+        }
+        LoadHandle::new(|| {})
+    }
+}
+
 impl FileSource for RejectingFileSource {
     fn validate_location(&self, _location: &Location) -> Result<(), LocationValidationError> {
         Err(LocationValidationError::Inaccessible)
@@ -154,6 +191,41 @@ fn filesystem_notifications_reload_the_affected_column() {
             .borrow()
             .iter()
             .any(|event| matches!(event, BrowserEvent::EntriesInserted { depth: 0, .. }))
+    );
+}
+
+#[test]
+fn retrying_a_failed_column_preserves_navigation_history() {
+    let attempts = Rc::new(Cell::new(0));
+    let browser = Browser::new(Rc::new(RetryFileSource {
+        attempts: attempts.clone(),
+    }));
+    let events = Rc::new(RefCell::new(Vec::new()));
+    let observed = events.clone();
+    browser.observe(move |event| observed.borrow_mut().push(event));
+    browser.navigate(Location::local("/fixture"));
+    events.borrow_mut().clear();
+
+    browser.retry_column(0);
+
+    assert_eq!(attempts.get(), 2);
+    assert!(
+        events
+            .borrow()
+            .iter()
+            .any(|event| matches!(event, BrowserEvent::ColumnReloaded { depth: 0 }))
+    );
+    assert!(
+        events
+            .borrow()
+            .iter()
+            .any(|event| matches!(event, BrowserEvent::EntriesInserted { depth: 0, .. }))
+    );
+    assert!(
+        !events
+            .borrow()
+            .iter()
+            .any(|event| matches!(event, BrowserEvent::Reset))
     );
 }
 

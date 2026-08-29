@@ -140,6 +140,33 @@ headerbar .sidebar-toggle:checked {
   background: alpha(#243d56, 0.68);
 }
 
+.loading-skeleton {
+  padding: 16px 18px;
+}
+
+.skeleton-row {
+  background: alpha(#8bc9eb, 0.12);
+  border-radius: 4px;
+  min-height: 10px;
+}
+
+.directory-feedback {
+  color: #4d86b0;
+  padding: 24px;
+}
+
+.status-message {
+  font-size: 0.95em;
+}
+
+.status-message.error {
+  color: #fca5a5;
+}
+
+.retry-button {
+  margin-top: 4px;
+}
+
 .empty-state {
   color: #4d86b0;
   font-size: 1.1em;

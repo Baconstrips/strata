@@ -430,6 +430,10 @@ impl Browser {
         )
     }
 
+    pub fn retry_column(self: &Rc<Self>, depth: usize) {
+        self.refresh_column(depth);
+    }
+
     fn refresh_column(self: &Rc<Self>, depth: usize) {
         let request_id = self.new_request_id();
         let location = self.state.borrow_mut().reload_column(depth, request_id);

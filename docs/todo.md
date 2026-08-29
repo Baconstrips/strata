@@ -64,7 +64,7 @@ Legend: **P0** blocks the milestone, **P1** is required for its exit criteria, *
 - [x] **P0** Keep the newest active column visible by scrolling to the end during horizontal overflow
 - [x] **P0** Preserve selection per committed column
 - [x] **P1** Make column entry animations interruptible and remove closed columns immediately
-- [ ] **P1** Add loading skeleton and directory error state
+- [x] **P1** Add loading skeleton and directory error state
 - [x] **P1** Cancel enumeration when a column is removed
 
 ### Hover peeking

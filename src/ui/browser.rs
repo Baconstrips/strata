@@ -22,9 +22,19 @@ const COLUMN_OFFSET: i32 = 24;
 const COLUMN_TRANSITION: Duration = Duration::from_millis(220);
 
 #[derive(Clone)]
+struct LoadPresentation {
+    stack: gtk::Stack,
+    skeleton: gtk::Box,
+    feedback: gtk::Box,
+    message: gtk::Label,
+    retry: Option<gtk::Button>,
+}
+
+#[derive(Clone)]
 struct ColumnView {
     shell: gtk::Box,
     animation_generation: Rc<Cell<u64>>,
+    presentation: LoadPresentation,
     model: gtk::StringList,
     selection: gtk::SingleSelection,
     list: gtk::ListView,
@@ -35,9 +45,88 @@ struct ColumnView {
 struct PeekView {
     revealer: gtk::Revealer,
     location: Location,
+    presentation: LoadPresentation,
     model: gtk::StringList,
     entry_count: Rc<Cell<usize>>,
     spinner: gtk::Spinner,
+}
+
+impl LoadPresentation {
+    fn new(content: &impl IsA<gtk::Widget>, retry: Option<gtk::Button>) -> Self {
+        let skeleton = gtk::Box::new(gtk::Orientation::Vertical, 9);
+        skeleton.add_css_class("loading-skeleton");
+        for width in [168, 124, 192, 148, 176, 112] {
+            let row = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+            row.add_css_class("skeleton-row");
+            row.set_size_request(width, 10);
+            row.set_halign(gtk::Align::Start);
+            skeleton.append(&row);
+        }
+
+        let feedback = gtk::Box::new(gtk::Orientation::Vertical, 8);
+        feedback.add_css_class("directory-feedback");
+        feedback.set_halign(gtk::Align::Center);
+        feedback.set_valign(gtk::Align::Center);
+        let message = gtk::Label::new(None);
+        message.add_css_class("status-message");
+        message.set_justify(gtk::Justification::Center);
+        message.set_wrap(true);
+        feedback.append(&message);
+        if let Some(button) = retry.as_ref() {
+            button.set_halign(gtk::Align::Center);
+            feedback.append(button);
+        }
+
+        let stack = gtk::Stack::builder()
+            .transition_type(gtk::StackTransitionType::Crossfade)
+            .transition_duration(100)
+            .hexpand(true)
+            .vexpand(true)
+            .build();
+        stack.add_named(content, Some("content"));
+        stack.add_named(&skeleton, Some("loading"));
+        stack.add_named(&feedback, Some("feedback"));
+        stack.set_visible_child_name("loading");
+
+        Self {
+            stack,
+            skeleton,
+            feedback,
+            message,
+            retry,
+        }
+    }
+
+    fn show_loading(&self) {
+        self.skeleton.set_visible(true);
+        self.feedback.set_visible(true);
+        if let Some(retry) = self.retry.as_ref() {
+            retry.set_visible(false);
+        }
+        self.stack.set_visible_child_name("loading");
+    }
+
+    fn show_content(&self) {
+        self.stack.set_visible_child_name("content");
+    }
+
+    fn show_empty(&self) {
+        self.message.set_text("This directory is empty");
+        self.message.remove_css_class("error");
+        if let Some(retry) = self.retry.as_ref() {
+            retry.set_visible(false);
+        }
+        self.stack.set_visible_child_name("feedback");
+    }
+
+    fn show_error(&self, message: &str) {
+        self.message.set_text(message);
+        self.message.add_css_class("error");
+        if let Some(retry) = self.retry.as_ref() {
+            retry.set_visible(true);
+        }
+        self.stack.set_visible_child_name("feedback");
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -307,6 +396,9 @@ impl ViewState {
                     .map(|insertion| insertion.entries.len())
                     .sum();
                 if let Some(column) = self.columns.borrow().get(depth).cloned() {
+                    if entry_count > 0 {
+                        column.presentation.show_content();
+                    }
                     for insertion in insertions {
                         let labels: Vec<_> = insertion
                             .entries
@@ -327,6 +419,9 @@ impl ViewState {
             }
             BrowserEvent::EntriesReplaced { depth, entries } => {
                 if let Some(column) = self.columns.borrow().get(depth).cloned() {
+                    if !entries.is_empty() {
+                        column.presentation.show_content();
+                    }
                     let labels: Vec<_> = entries
                         .iter()
                         .map(|entry| {
@@ -345,6 +440,7 @@ impl ViewState {
                     column.entry_count.set(0);
                     column.spinner.set_visible(true);
                     column.spinner.start();
+                    column.presentation.show_loading();
                 }
             }
             BrowserEvent::LoadFinished { depth } => {
@@ -352,7 +448,9 @@ impl ViewState {
                     column.spinner.stop();
                     column.spinner.set_visible(false);
                     if column.entry_count.get() == 0 {
-                        column.model.append("This directory is empty");
+                        column.presentation.show_empty();
+                    } else {
+                        column.presentation.show_content();
                     }
                 }
             }
@@ -360,12 +458,17 @@ impl ViewState {
                 if let Some(column) = self.columns.borrow().get(depth) {
                     column.spinner.stop();
                     column.spinner.set_visible(false);
-                    column.model.append(&format!("Unable to read: {message}"));
+                    column
+                        .presentation
+                        .show_error(&format!("Unable to read this directory\n{message}"));
                 }
             }
             BrowserEvent::PeekStarted { location } => self.append_peek(&location),
             BrowserEvent::PeekEntriesAdded { entries } => {
                 if let Some(peek) = self.peek.borrow().as_ref() {
+                    if !entries.is_empty() {
+                        peek.presentation.show_content();
+                    }
                     append_entries(
                         &peek.model,
                         &peek.entry_count,
@@ -379,7 +482,9 @@ impl ViewState {
                     peek.spinner.stop();
                     peek.spinner.set_visible(false);
                     if peek.entry_count.get() == 0 {
-                        peek.model.append("This directory is empty");
+                        peek.presentation.show_empty();
+                    } else {
+                        peek.presentation.show_content();
                     }
                 }
             }
@@ -387,7 +492,8 @@ impl ViewState {
                 if let Some(peek) = self.peek.borrow().as_ref() {
                     peek.spinner.stop();
                     peek.spinner.set_visible(false);
-                    peek.model.append(&format!("Unable to read: {message}"));
+                    peek.presentation
+                        .show_error(&format!("Unable to read this directory\n{message}"));
                 }
             }
             BrowserEvent::PeekClosed => self.close_peek_visual(),
@@ -505,7 +611,16 @@ impl ViewState {
             .hscrollbar_policy(gtk::PolicyType::Never)
             .vexpand(true)
             .build();
-        column.append(&scroll);
+        let retry = gtk::Button::with_label("Retry");
+        retry.add_css_class("retry-button");
+        let weak_browser = Rc::downgrade(&self.browser);
+        retry.connect_clicked(move |_| {
+            if let Some(browser) = weak_browser.upgrade() {
+                browser.retry_column(depth);
+            }
+        });
+        let presentation = LoadPresentation::new(&scroll, Some(retry));
+        column.append(&presentation.stack);
 
         let shell = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         shell.set_size_request(COLUMN_WIDTH, -1);
@@ -522,6 +637,7 @@ impl ViewState {
         self.columns.borrow_mut().push(ColumnView {
             shell: shell.clone(),
             animation_generation: animation_generation.clone(),
+            presentation,
             model,
             selection,
             list,
@@ -657,7 +773,9 @@ impl ViewState {
             .max_content_height(240)
             .propagate_natural_height(true)
             .build();
-        content.append(&scroll);
+        let presentation = LoadPresentation::new(&scroll, None);
+        presentation.stack.set_size_request(-1, 120);
+        content.append(&presentation.stack);
 
         let motion = gtk::EventControllerMotion::new();
         let weak_state = Rc::downgrade(self);
@@ -714,6 +832,7 @@ impl ViewState {
         self.peek.replace(Some(PeekView {
             revealer: revealer.clone(),
             location: location.clone(),
+            presentation,
             model,
             entry_count,
             spinner,
