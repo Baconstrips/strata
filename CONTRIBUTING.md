@@ -17,8 +17,9 @@ cargo run
 ```
 
 To rebuild and restart the running application whenever code or bundled assets
-change, use the development watcher. It installs `cargo-watch` automatically if
-needed:
+change, use the development watcher. On Arch, Debian/Ubuntu, and Fedora, it
+installs missing native dependencies (prompting for `sudo`) and installs
+`cargo-watch` automatically when needed:
 
 ```bash
 make start-dev

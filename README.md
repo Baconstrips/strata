@@ -79,8 +79,9 @@ cargo run
 ```
 
 For development, run Strata in auto-reload mode. The app rebuilds and restarts
-when code or bundled assets change, installing `cargo-watch` automatically if
-needed:
+when code or bundled assets change. On Arch, Debian/Ubuntu, and Fedora,
+`start-dev` installs missing native dependencies (prompting for `sudo`) and
+installs `cargo-watch` automatically when needed:
 
 ```bash
 make start-dev
