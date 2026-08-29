@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use std::{env, path::PathBuf, rc::Rc};
+use std::{
+    cell::Cell,
+    env,
+    path::PathBuf,
+    rc::Rc,
+    time::{Duration, Instant},
+};
 
 use gtk::{glib, prelude::*};
 
@@ -11,6 +17,9 @@ use crate::{
 };
 
 use super::browser::{BrowserView, PeekBehavior};
+
+const SIDEBAR_WIDTH: i32 = 208;
+const SIDEBAR_TRANSITION: Duration = Duration::from_millis(300);
 
 pub fn present(application: &gtk::Application) {
     present_location(application, None);
@@ -30,12 +39,16 @@ pub fn present_location(application: &gtk::Application, location: Option<PathBuf
     let browser = BrowserView::new(Rc::new(LocalFileSource), PeekBehavior::default());
     let controller = browser.browser();
 
-    let title = gtk::Label::new(Some("Strata"));
-    title.add_css_class("title");
-    let title_area = gtk::Box::new(gtk::Orientation::Horizontal, 12);
-    title_area.append(&title);
-    title_area.append(&browser.location_widget());
-    let header = gtk::HeaderBar::builder().title_widget(&title_area).build();
+    let header = gtk::HeaderBar::new();
+    header.set_title_widget(Some(&gtk::Box::new(gtk::Orientation::Horizontal, 0)));
+    let sidebar_toggle = gtk::ToggleButton::builder()
+        .icon_name(crate::assets::icons::PANEL_LEFT)
+        .active(true)
+        .tooltip_text("Toggle sidebar")
+        .build();
+    sidebar_toggle.add_css_class("sidebar-toggle");
+    header.pack_start(&sidebar_toggle);
+    header.pack_start(&browser.location_widget());
     let search_button = gtk::Button::builder()
         .icon_name(crate::assets::icons::SEARCH)
         .tooltip_text("Search")
@@ -80,56 +93,33 @@ pub fn present_location(application: &gtk::Application, location: Option<PathBuf
     });
     header.pack_end(&folders_first);
 
-    let back = navigation_button("go-previous-symbolic", "Back");
-    let weak_controller = Rc::downgrade(&controller);
-    back.connect_clicked(move |_| {
-        if let Some(controller) = weak_controller.upgrade() {
-            controller.back();
-        }
-    });
-    header.pack_start(&back);
-
-    let forward = navigation_button("go-next-symbolic", "Forward");
-    let weak_controller = Rc::downgrade(&controller);
-    forward.connect_clicked(move |_| {
-        if let Some(controller) = weak_controller.upgrade() {
-            controller.forward();
-        }
-    });
-    header.pack_start(&forward);
-
-    let parent = navigation_button("go-up-symbolic", "Parent directory");
-    let weak_controller = Rc::downgrade(&controller);
-    parent.connect_clicked(move |_| {
-        if let Some(controller) = weak_controller.upgrade() {
-            controller.parent();
-        }
-    });
-    header.pack_start(&parent);
-
-    let home = navigation_button(crate::assets::icons::HOME, "Home");
-    let weak_controller = Rc::downgrade(&controller);
-    home.connect_clicked(move |_| {
-        if let Some(controller) = weak_controller.upgrade() {
-            controller.navigate(Location::local(home_directory()));
-        }
-    });
-    header.pack_start(&home);
     let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
     root.append(&header);
 
     let content = gtk::Paned::new(gtk::Orientation::Horizontal);
     content.set_wide_handle(false);
-    content.set_shrink_start_child(false);
+    content.set_shrink_start_child(true);
     content.set_resize_start_child(false);
-    content.set_position(220);
+    content.set_position(SIDEBAR_WIDTH);
     content.set_vexpand(true);
-    content.set_start_child(Some(&build_sidebar(&browser.browser())));
+    let sidebar = build_sidebar(&browser.browser());
+    content.set_start_child(Some(&sidebar));
     content.set_end_child(Some(&browser.widget()));
+    let animation_generation = Rc::new(Cell::new(0));
+    let animated_content = content.clone();
+    let animated_sidebar = sidebar.clone();
+    sidebar_toggle.connect_toggled(move |toggle| {
+        animate_sidebar(
+            &animated_content,
+            &animated_sidebar,
+            &animation_generation,
+            toggle.is_active(),
+        );
+    });
     root.append(&content);
 
     window.set_child(Some(&root));
-    install_keyboard_navigation(&window, &browser);
+    install_keyboard_navigation(&window, &browser, &sidebar_toggle);
     browser.navigate(location.unwrap_or_else(home_directory));
 
     let browser_controller = browser.browser();
@@ -138,10 +128,87 @@ pub fn present_location(application: &gtk::Application, location: Option<PathBuf
     crate::metrics::mark_window_presented();
 }
 
-fn install_keyboard_navigation(window: &gtk::ApplicationWindow, view: &BrowserView) {
+fn animate_sidebar(
+    paned: &gtk::Paned,
+    sidebar: &gtk::Widget,
+    generation: &Rc<Cell<u64>>,
+    expanded: bool,
+) {
+    let animation_id = generation.get().saturating_add(1);
+    generation.set(animation_id);
+    let target = if expanded { SIDEBAR_WIDTH } else { 0 };
+    let start = paned.position();
+    if expanded {
+        sidebar.set_visible(true);
+    }
+
+    let animations_enabled = gtk::Settings::default()
+        .map(|settings| settings.is_gtk_enable_animations())
+        .unwrap_or(true);
+    if !animations_enabled || start == target {
+        paned.set_position(target);
+        sidebar.set_visible(expanded);
+        return;
+    }
+
+    let started = Instant::now();
+    let paned = paned.clone();
+    let sidebar = sidebar.clone();
+    let generation = generation.clone();
+    let _tick = paned.clone().add_tick_callback(move |_, _| {
+        if generation.get() != animation_id {
+            return glib::ControlFlow::Break;
+        }
+
+        let progress =
+            (started.elapsed().as_secs_f64() / SIDEBAR_TRANSITION.as_secs_f64()).clamp(0.0, 1.0);
+        let eased = emphasized_deceleration(progress);
+        let position = f64::from(start) + f64::from(target - start) * eased;
+        paned.set_position(position.round() as i32);
+
+        if progress >= 1.0 {
+            paned.set_position(target);
+            if !expanded {
+                sidebar.set_visible(false);
+            }
+            glib::ControlFlow::Break
+        } else {
+            glib::ControlFlow::Continue
+        }
+    });
+}
+
+fn emphasized_deceleration(progress: f64) -> f64 {
+    let progress = progress.clamp(0.0, 1.0);
+    let mut lower = 0.0;
+    let mut upper = 1.0;
+    for _ in 0..16 {
+        let time = (lower + upper) / 2.0;
+        if cubic_coordinate(time, 0.16, 0.3) < progress {
+            lower = time;
+        } else {
+            upper = time;
+        }
+    }
+    cubic_coordinate((lower + upper) / 2.0, 1.0, 1.0)
+}
+
+fn cubic_coordinate(time: f64, first: f64, second: f64) -> f64 {
+    let inverse = 1.0 - time;
+    3.0 * inverse * inverse * time * first
+        + 3.0 * inverse * time * time * second
+        + time * time * time
+}
+
+fn install_keyboard_navigation(
+    window: &gtk::ApplicationWindow,
+    view: &BrowserView,
+    sidebar_toggle: &gtk::ToggleButton,
+) {
     let keys = gtk::EventControllerKey::new();
     keys.set_propagation_phase(gtk::PropagationPhase::Capture);
     let view = view.clone();
+    let sidebar_toggle = sidebar_toggle.clone();
     let weak_browser = Rc::downgrade(&view.browser());
     keys.connect_key_pressed(move |_, key, _, modifiers| {
         let Some(browser) = weak_browser.upgrade() else {
@@ -151,6 +218,10 @@ fn install_keyboard_navigation(window: &gtk::ApplicationWindow, view: &BrowserVi
         let control = modifiers.contains(gtk::gdk::ModifierType::CONTROL_MASK);
         if control && key == gtk::gdk::Key::l {
             view.begin_location_edit();
+            return glib::Propagation::Stop;
+        }
+        if control && key == gtk::gdk::Key::b {
+            sidebar_toggle.set_active(!sidebar_toggle.is_active());
             return glib::Propagation::Stop;
         }
         if view.location_has_focus() {
@@ -168,6 +239,7 @@ fn install_keyboard_navigation(window: &gtk::ApplicationWindow, view: &BrowserVi
         match (key, alt) {
             (gtk::gdk::Key::Left, true) => browser.back(),
             (gtk::gdk::Key::Right, true) => browser.forward(),
+            (gtk::gdk::Key::Up, true) => browser.parent(),
             (gtk::gdk::Key::Home, true) => {
                 browser.navigate(Location::local(home_directory()));
             }
@@ -199,7 +271,7 @@ fn navigation_button(icon: &str, tooltip: &str) -> gtk::Button {
 fn build_sidebar(browser: &Rc<Browser>) -> gtk::Widget {
     let sidebar = gtk::Box::new(gtk::Orientation::Vertical, 4);
     sidebar.add_css_class("sidebar");
-    sidebar.set_size_request(180, -1);
+    sidebar.set_size_request(SIDEBAR_WIDTH, -1);
 
     let heading = gtk::Label::new(Some("PLACES"));
     heading.set_xalign(0.0);
@@ -273,3 +345,6 @@ fn load_styles() {
         );
     }
 }
+
+#[cfg(test)]
+mod tests;

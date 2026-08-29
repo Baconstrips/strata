@@ -13,6 +13,7 @@ pub mod icons {
     pub const DOCUMENTS: &str = "strata-file-text-symbolic";
     pub const DOWNLOADS: &str = "strata-download-symbolic";
     pub const HOME: &str = "strata-house-symbolic";
+    pub const PANEL_LEFT: &str = "strata-panel-left-symbolic";
     pub const PICTURES: &str = "strata-image-symbolic";
     pub const SEARCH: &str = "strata-search-symbolic";
     pub const VIDEOS: &str = "strata-video-symbolic";

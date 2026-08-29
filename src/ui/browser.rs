@@ -53,6 +53,8 @@ impl Default for PeekBehavior {
 
 struct ViewState {
     overlay: gtk::Overlay,
+    location_stack: gtk::Stack,
+    breadcrumbs: gtk::Box,
     location_entry: gtk::Entry,
     location_error: gtk::Label,
     columns_widget: gtk::Box,
@@ -99,10 +101,35 @@ impl BrowserView {
         location_error.add_css_class("location-error");
         location_error.set_visible(false);
         location_error.set_xalign(0.0);
+        let entry_control = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        entry_control.append(&location_entry);
+        entry_control.append(&location_error);
+
+        let breadcrumbs = gtk::Box::new(gtk::Orientation::Horizontal, 2);
+        breadcrumbs.add_css_class("breadcrumbs");
+        let breadcrumb_scroller = gtk::ScrolledWindow::builder()
+            .child(&breadcrumbs)
+            .hscrollbar_policy(gtk::PolicyType::Automatic)
+            .vscrollbar_policy(gtk::PolicyType::Never)
+            .hexpand(true)
+            .build();
+        let location_stack = gtk::Stack::builder()
+            .hhomogeneous(false)
+            .vhomogeneous(false)
+            .transition_type(gtk::StackTransitionType::Crossfade)
+            .transition_duration(100)
+            .build();
+        location_stack.add_named(&breadcrumb_scroller, Some("breadcrumbs"));
+        location_stack.add_named(&entry_control, Some("entry"));
+        location_stack.set_visible_child_name("breadcrumbs");
+        location_stack.add_css_class("location-control");
+        location_stack.set_hexpand(true);
 
         let browser = Browser::new(source);
         let state = Rc::new(ViewState {
             overlay,
+            location_stack,
+            breadcrumbs,
             location_entry,
             location_error,
             columns_widget,
@@ -148,15 +175,12 @@ impl BrowserView {
     }
 
     pub fn location_widget(&self) -> gtk::Widget {
-        let container = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        container.add_css_class("location-control");
-        container.append(&self.state.location_entry);
-        container.append(&self.state.location_error);
-        container.upcast()
+        self.state.location_stack.clone().upcast()
     }
 
     pub fn begin_location_edit(&self) {
         self.state.clear_location_error();
+        self.state.location_stack.set_visible_child_name("entry");
         self.state.location_entry.grab_focus();
         self.state.location_entry.select_region(0, -1);
     }
@@ -168,6 +192,9 @@ impl BrowserView {
     pub fn cancel_location_edit(&self) {
         self.state.restore_location_text();
         self.state.clear_location_error();
+        self.state
+            .location_stack
+            .set_visible_child_name("breadcrumbs");
         self.state.browser.focus_active();
     }
 }
@@ -192,6 +219,56 @@ impl ViewState {
         }
     }
 
+    fn sync_active_location(self: &Rc<Self>) {
+        if let Some(location) = self.browser.active_location() {
+            self.set_location(&location);
+        }
+    }
+
+    fn set_location(self: &Rc<Self>, location: &Location) {
+        self.location_entry.set_text(&location.display_path());
+        while let Some(child) = self.breadcrumbs.first_child() {
+            self.breadcrumbs.remove(&child);
+        }
+
+        let home = Location::local(glib::home_dir());
+        let mut locations = location.breadcrumbs();
+        if let Some(home_index) = locations.iter().position(|crumb| crumb == &home) {
+            locations.drain(..home_index);
+        }
+        let last = locations.len().saturating_sub(1);
+        for (index, crumb) in locations.into_iter().enumerate() {
+            if index > 0 {
+                let separator = gtk::Label::new(Some("/"));
+                separator.add_css_class("breadcrumb-separator");
+                self.breadcrumbs.append(&separator);
+            }
+
+            let label = if crumb == home {
+                "~".to_owned()
+            } else {
+                crumb.display_name()
+            };
+            let button = gtk::Button::with_label(&label);
+            button.add_css_class("breadcrumb");
+            button.set_has_frame(false);
+            button.set_tooltip_text(Some(&crumb.display_path()));
+            if index == last {
+                button.add_css_class("current");
+                button.set_sensitive(false);
+            } else {
+                let weak = Rc::downgrade(self);
+                button.connect_clicked(move |_| {
+                    if let Some(state) = weak.upgrade() {
+                        state.browser.navigate(crumb.clone());
+                    }
+                });
+            }
+            self.breadcrumbs.append(&button);
+        }
+        self.location_stack.set_visible_child_name("breadcrumbs");
+    }
+
     fn clear_location_error(&self) {
         self.location_entry.remove_css_class("error");
         self.location_error.set_visible(false);
@@ -206,10 +283,10 @@ impl ViewState {
             }
             BrowserEvent::ColumnsTruncated { len } => {
                 self.truncate(len);
-                self.restore_location_text();
+                self.sync_active_location();
             }
             BrowserEvent::ColumnAdded { depth, location } => {
-                self.location_entry.set_text(&location.display_path());
+                self.set_location(&location);
                 self.clear_location_error();
                 self.append_column(depth, &location);
             }

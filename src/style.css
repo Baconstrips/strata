@@ -12,11 +12,52 @@ headerbar {
 }
 
 .location-control {
-  min-width: 28em;
+  min-width: 36em;
+}
+
+headerbar .sidebar-toggle,
+headerbar .sidebar-toggle:hover,
+headerbar .sidebar-toggle:active,
+headerbar .sidebar-toggle:checked {
+  background: transparent;
+  background-image: none;
+  border: none;
+  box-shadow: none;
+  color: #22d3ee;
+  padding: 6px;
 }
 
 .location-entry {
   min-height: 30px;
+}
+
+.breadcrumbs {
+  min-height: 30px;
+}
+
+.breadcrumb {
+  background: transparent;
+  color: #4d86b0;
+  min-height: 28px;
+  padding: 2px 6px;
+}
+
+.breadcrumb:hover {
+  background: alpha(#304860, 0.45);
+  color: #8bc9eb;
+}
+
+.breadcrumb.current,
+.breadcrumb.current:disabled {
+  color: #22d3ee;
+  font-weight: 700;
+  opacity: 1;
+}
+
+.breadcrumb-separator {
+  color: #315f7e;
+  font-size: 1.15em;
+  margin: 0 2px;
 }
 
 .location-entry.error {

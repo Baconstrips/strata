@@ -29,6 +29,12 @@ impl Location {
             .filter(|name| !name.is_empty())
             .unwrap_or_else(|| self.path.to_string_lossy().into_owned())
     }
+
+    pub fn breadcrumbs(&self) -> Vec<Self> {
+        let mut locations: Vec<_> = self.path.ancestors().map(Self::local).collect();
+        locations.reverse();
+        locations
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -94,3 +100,6 @@ impl FileEntry {
         self.kind == EntryKind::Directory
     }
 }
+
+#[cfg(test)]
+mod tests;

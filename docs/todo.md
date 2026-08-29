@@ -82,7 +82,7 @@ Legend: **P0** blocks the milestone, **P1** is required for its exit criteria, *
 
 - [x] **P0** Back, forward, parent, and home commands
 - [x] **P0** Editable location entry with validation and error feedback
-- [ ] **P1** Breadcrumb/path display
+- [x] **P1** Breadcrumb/path display
 - [x] **P1** Reveal and focus the active location after navigation
 - [ ] **P1** Handle symlinks and inaccessible destinations deliberately
 
@@ -113,7 +113,7 @@ Legend: **P0** blocks the milestone, **P1** is required for its exit criteria, *
 - [x] **P0** Resolve standard user directories instead of assuming English folder names
 - [ ] **P0** Add mounted volumes and Trash
 - [ ] **P1** Add, remove, activate, and reorder bookmarks
-- [ ] **P1** Collapse sidebar with mouse and keyboard
+- [x] **P1** Collapse sidebar with mouse and keyboard
 - [ ] **P1** Persist sidebar state and bookmarks
 
 ## M2 — Everyday file manager
