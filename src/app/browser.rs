@@ -32,6 +32,17 @@ pub enum BrowserEvent {
         depth: usize,
         message: String,
     },
+    PeekStarted {
+        location: Location,
+    },
+    PeekEntriesAdded {
+        entries: Vec<FileEntry>,
+    },
+    PeekFinished,
+    PeekFailed {
+        message: String,
+    },
+    PeekClosed,
 }
 
 type Observer = Rc<dyn Fn(BrowserEvent)>;
@@ -40,6 +51,7 @@ pub struct Browser {
     source: Rc<dyn FileSource>,
     state: RefCell<NavigationState>,
     loads: RefCell<Vec<LoadHandle>>,
+    peek_load: RefCell<Option<LoadHandle>>,
     next_request: Cell<u64>,
     observer: RefCell<Option<Observer>>,
 }
@@ -50,6 +62,7 @@ impl Browser {
             source,
             state: RefCell::new(NavigationState::default()),
             loads: RefCell::new(Vec::new()),
+            peek_load: RefCell::new(None),
             next_request: Cell::new(1),
             observer: RefCell::new(None),
         })
@@ -64,6 +77,7 @@ impl Browser {
     }
 
     pub fn navigate(self: &Rc<Self>, location: Location) {
+        self.close_peek();
         self.loads.borrow_mut().clear();
         let request_id = self.new_request_id();
         self.state
@@ -78,6 +92,7 @@ impl Browser {
     }
 
     pub fn descend(self: &Rc<Self>, parent_depth: usize, location: Location) {
+        self.close_peek();
         let request_id = self.new_request_id();
         if !self
             .state
@@ -95,6 +110,52 @@ impl Browser {
             location: location.clone(),
         });
         self.start_load(location, request_id);
+    }
+
+    pub fn begin_peek(self: &Rc<Self>, origin_depth: usize, location: Location) {
+        self.close_peek();
+        let request_id = self.new_request_id();
+        if !self
+            .state
+            .borrow_mut()
+            .begin_peek(origin_depth, location.clone(), request_id)
+        {
+            return;
+        }
+
+        self.emit(BrowserEvent::PeekStarted {
+            location: location.clone(),
+        });
+        let weak: Weak<Self> = Rc::downgrade(self);
+        let emit = Rc::new(move |event| {
+            if let Some(browser) = weak.upgrade() {
+                browser.handle_directory_event(event);
+            }
+        });
+        let handle = self.source.enumerate(
+            DirectoryRequest {
+                id: request_id,
+                location,
+                batch_size: 128,
+            },
+            emit,
+        );
+        self.peek_load.replace(Some(handle));
+    }
+
+    pub fn close_peek(&self) {
+        self.peek_load.take();
+        if self.state.borrow_mut().clear_peek() {
+            self.emit(BrowserEvent::PeekClosed);
+        }
+    }
+
+    pub fn commit_peek(self: &Rc<Self>) {
+        let target = self.state.borrow().peek_target();
+        if let Some((origin_depth, location)) = target {
+            self.close_peek();
+            self.descend(origin_depth, location);
+        }
     }
 
     pub fn back(self: &Rc<Self>) {
@@ -123,6 +184,7 @@ impl Browser {
     }
 
     fn restore_path(self: &Rc<Self>, path: NavigationPath) {
+        self.close_peek();
         self.loads.borrow_mut().clear();
         let loads: Vec<_> = path
             .locations()
@@ -182,19 +244,32 @@ impl Browser {
                     );
                     drop(state);
                     self.emit(BrowserEvent::EntriesAdded { depth, entries });
+                } else if state.apply_peek_batch(request_id, &entries) {
+                    drop(state);
+                    self.emit(BrowserEvent::PeekEntriesAdded { entries });
                 }
             }
             DirectoryEvent::Finished { request_id } => {
-                if let Some(depth) = self.state.borrow_mut().finish(request_id) {
+                let mut state = self.state.borrow_mut();
+                if let Some(depth) = state.finish(request_id) {
+                    drop(state);
                     self.emit(BrowserEvent::LoadFinished { depth });
+                } else if state.finish_peek(request_id) {
+                    drop(state);
+                    self.emit(BrowserEvent::PeekFinished);
                 }
             }
             DirectoryEvent::Failed {
                 request_id,
                 message,
             } => {
-                if let Some(depth) = self.state.borrow_mut().fail(request_id, message.clone()) {
+                let mut state = self.state.borrow_mut();
+                if let Some(depth) = state.fail(request_id, message.clone()) {
+                    drop(state);
                     self.emit(BrowserEvent::LoadFailed { depth, message });
+                } else if state.fail_peek(request_id, message.clone()) {
+                    drop(state);
+                    self.emit(BrowserEvent::PeekFailed { message });
                 }
             }
         }

@@ -29,6 +29,27 @@ headerbar {
   border-right: 1px solid alpha(#8bc9eb, 0.14);
 }
 
+.peek-popover {
+  background: #0d202a;
+  border: 1px solid alpha(#22d3ee, 0.34);
+  border-radius: 6px;
+  box-shadow: 0 12px 32px alpha(#000000, 0.42);
+  color: #d6e2ee;
+  padding: 0;
+}
+
+.peek-popover .column-header {
+  background: #0d202a;
+  border-bottom: 1px solid alpha(#8bc9eb, 0.14);
+  border-radius: 6px 6px 0 0;
+}
+
+.peek-popover scrolledwindow,
+.peek-popover viewport,
+.peek-popover listview {
+  background: #0d202a;
+}
+
 .column-header {
   color: #8bc9eb;
   font-weight: 700;

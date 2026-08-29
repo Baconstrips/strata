@@ -28,7 +28,7 @@ Legend: **P0** blocks the milestone, **P1** is required for its exit criteria, *
 ### Models and state
 
 - [x] **P0** Introduce native-path-safe `Location` and `FileEntry` models
-- [ ] **P0** Model committed `NavigationPath` separately from temporary `PeekState`
+- [x] **P0** Model committed `NavigationPath` separately from temporary `PeekState`
 - [ ] **P0** Add explicit active-column, focus, and selection state
 - [x] **P0** Add navigation commands and reducer/controller tests
 - [x] **P1** Add typed loading, empty, unavailable, and error states
@@ -69,12 +69,12 @@ Legend: **P0** blocks the milestone, **P1** is required for its exit criteria, *
 
 ### Hover peeking
 
-- [ ] **P0** Add configurable hover debounce
-- [ ] **P0** Model peek without modifying committed history
-- [ ] **P0** Cancel obsolete peeks and ignore stale results
-- [ ] **P0** Keep peek alive while moving into its temporary column
-- [ ] **P0** Commit a peek by click or keyboard action
-- [ ] **P1** Restore committed columns when a peek closes
+- [x] **P0** Add configurable hover debounce
+- [x] **P0** Model peek without modifying committed history
+- [x] **P0** Cancel obsolete peeks and ignore stale results
+- [x] **P0** Keep peek alive while moving into its anchored popover
+- [x] **P0** Commit a peek by click or keyboard action
+- [x] **P1** Dismiss the popover without changing committed columns when a peek closes
 - [ ] **P1** Add setting to disable hover peeking
 - [ ] **P1** Test rapid pointer movement and slow directories
 

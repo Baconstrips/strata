@@ -86,7 +86,8 @@ These are not permanently rejected; they are excluded from the first release to 
 - Clicking or pressing the commit key converts the peek into navigation.
 - Obsolete peek requests are cancelled.
 - Peeking never modifies back/forward history.
-- Pointer movement across the temporary column keeps the peek alive.
+- The peek appears as an anchored popover beside the hovered row and never joins or reflows the Miller-column strip.
+- Pointer movement into the popover keeps the peek alive.
 - Peeking can be disabled and its delay can be configured.
 
 ### 7.3 Search
@@ -257,7 +258,7 @@ The MVP is complete when a user can:
 ## 11. Open product questions
 
 - Should a single click commit navigation, or should this be configurable?
-- How should a peek transition into a committed path when the pointer enters the peeked column?
+- Should entering the peek popover transfer keyboard focus automatically or only after explicit interaction?
 - Should list/grid mode apply globally, per location, or per window?
 - Which source-code languages receive syntax highlighting in the first release?
 - What should the default balance be between thumbnail quality and generation cost?

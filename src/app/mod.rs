@@ -2,5 +2,6 @@
 
 mod browser;
 mod navigation;
+mod peek;
 
 pub use browser::{Browser, BrowserEvent};

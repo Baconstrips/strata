@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use crate::{
+    app::peek::PeekState,
     model::{FileEntry, Location},
     services::RequestId,
 };
@@ -55,6 +56,7 @@ impl NavigationPath {
 #[derive(Default)]
 pub struct NavigationState {
     pub columns: Vec<ColumnState>,
+    peek: Option<PeekState>,
     back_history: Vec<NavigationPath>,
     forward_history: Vec<NavigationPath>,
 }
@@ -76,6 +78,7 @@ impl NavigationState {
         }
 
         self.record_navigation();
+        self.peek = None;
         self.columns.truncate(parent_depth + 1);
         self.push_column(location, request_id);
         true
@@ -108,6 +111,7 @@ impl NavigationState {
         path: NavigationPath,
         request_ids: impl IntoIterator<Item = RequestId>,
     ) {
+        self.peek = None;
         self.columns = path
             .locations
             .into_iter()
@@ -170,6 +174,53 @@ impl NavigationState {
         let (depth, column) = self.column_for_request_mut(request_id)?;
         column.load_state = LoadState::Error(message);
         Some(depth)
+    }
+
+    pub fn begin_peek(
+        &mut self,
+        origin_depth: usize,
+        location: Location,
+        request_id: RequestId,
+    ) -> bool {
+        if origin_depth >= self.columns.len() {
+            return false;
+        }
+        self.peek = Some(PeekState::new(origin_depth, location, request_id));
+        true
+    }
+
+    pub fn peek_target(&self) -> Option<(usize, Location)> {
+        self.peek
+            .as_ref()
+            .map(|peek| (peek.origin_depth, peek.location.clone()))
+    }
+
+    pub fn clear_peek(&mut self) -> bool {
+        self.peek.take().is_some()
+    }
+
+    pub fn apply_peek_batch(&mut self, request_id: RequestId, entries: &[FileEntry]) -> bool {
+        let Some(peek) = self.peek.as_mut().filter(|peek| peek.accepts(request_id)) else {
+            return false;
+        };
+        peek.append(entries);
+        true
+    }
+
+    pub fn finish_peek(&mut self, request_id: RequestId) -> bool {
+        let Some(peek) = self.peek.as_mut().filter(|peek| peek.accepts(request_id)) else {
+            return false;
+        };
+        peek.finish();
+        true
+    }
+
+    pub fn fail_peek(&mut self, request_id: RequestId, message: String) -> bool {
+        let Some(peek) = self.peek.as_mut().filter(|peek| peek.accepts(request_id)) else {
+            return false;
+        };
+        peek.fail(message);
+        true
     }
 
     pub fn select(&mut self, depth: usize, position: usize) -> bool {

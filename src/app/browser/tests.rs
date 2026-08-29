@@ -50,3 +50,64 @@ fn file_source_can_be_replaced_without_constructing_the_ui() {
             .any(|event| matches!(event, BrowserEvent::LoadFinished { .. }))
     );
 }
+
+#[test]
+fn peeking_streams_results_without_committing_navigation_history() {
+    let browser = Browser::new(Rc::new(FakeFileSource));
+    let events = Rc::new(RefCell::new(Vec::new()));
+    let observed = events.clone();
+    browser.observe(move |event| observed.borrow_mut().push(event));
+    browser.navigate(Location::local("/fixture"));
+
+    browser.begin_peek(0, Location::local("/fixture/child"));
+
+    assert!(
+        events
+            .borrow()
+            .iter()
+            .any(|event| matches!(event, BrowserEvent::PeekStarted { .. }))
+    );
+    assert!(events.borrow().iter().any(|event| matches!(
+        event,
+        BrowserEvent::PeekEntriesAdded { entries } if entries.len() == 1
+    )));
+    assert!(
+        events
+            .borrow()
+            .iter()
+            .any(|event| matches!(event, BrowserEvent::PeekFinished))
+    );
+
+    browser.back();
+    let resets = events
+        .borrow()
+        .iter()
+        .filter(|event| matches!(event, BrowserEvent::Reset))
+        .count();
+    assert_eq!(resets, 1, "a peek must not create a history entry");
+}
+
+#[test]
+fn committing_a_peek_descends_and_creates_history() {
+    let browser = Browser::new(Rc::new(FakeFileSource));
+    let events = Rc::new(RefCell::new(Vec::new()));
+    let observed = events.clone();
+    browser.observe(move |event| observed.borrow_mut().push(event));
+    browser.navigate(Location::local("/fixture"));
+    browser.begin_peek(0, Location::local("/fixture/child"));
+
+    browser.commit_peek();
+
+    assert!(events.borrow().iter().any(|event| matches!(
+        event,
+        BrowserEvent::ColumnAdded { depth: 1, location }
+            if location == &Location::local("/fixture/child")
+    )));
+    browser.back();
+    let resets = events
+        .borrow()
+        .iter()
+        .filter(|event| matches!(event, BrowserEvent::Reset))
+        .count();
+    assert_eq!(resets, 2, "committing a peek must create a history entry");
+}

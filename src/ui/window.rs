@@ -6,7 +6,7 @@ use gtk::{glib, prelude::*};
 
 use crate::{adapters::LocalFileSource, app::Browser, model::Location};
 
-use super::browser::BrowserView;
+use super::browser::{BrowserView, PeekBehavior};
 
 pub fn present(application: &gtk::Application) {
     crate::assets::register_icon_theme();
@@ -19,7 +19,7 @@ pub fn present(application: &gtk::Application) {
         .default_height(760)
         .build();
 
-    let browser = BrowserView::new(Rc::new(LocalFileSource));
+    let browser = BrowserView::new(Rc::new(LocalFileSource), PeekBehavior::default());
     let controller = browser.browser();
 
     let title = gtk::Label::new(Some("Strata"));

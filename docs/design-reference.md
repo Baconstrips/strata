@@ -127,6 +127,7 @@ Strata's native theme schema should retain these concepts where useful and map O
 - Active row indicated through color, outline, and restrained glow
 - Child directory chevron at the trailing edge
 - File size appears on row hover
+- Folder peeks float in an anchored popover beside the hovered row; they never join or reflow the Miller-column strip
 - Miller columns have no fixed depth limit; committed directories keep stacking in a horizontally scrollable strip
 - Opening a column after horizontal overflow automatically scrolls the strip to its end so the newest column is visible
 - Breadcrumbs remain available above Miller columns
