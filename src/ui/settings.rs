@@ -153,12 +153,24 @@ fn general_page(browser: &BrowserView, manager: Rc<ThemeManager>) -> gtk::Widget
         single_click_enabled,
     );
     let browser_for_previews = browser.clone();
+    let manager_for_previews = manager.clone();
     single_click_previews.connect_active_notify(move |toggle| {
         let enabled = toggle.is_active();
         browser_for_previews.set_single_click_previews(enabled);
-        manager.set_single_click_previews(enabled);
+        manager_for_previews.set_single_click_previews(enabled);
     });
     preferences.append(&preview_row);
+
+    let direct_open_enabled = manager.search_open_files_directly();
+    let (search_open_row, search_open_files) = settings_option(
+        "Open search results directly",
+        "Launch files from search instead of opening Strata's quick preview.",
+        direct_open_enabled,
+    );
+    search_open_files.connect_active_notify(move |toggle| {
+        manager.set_search_open_files_directly(toggle.is_active());
+    });
+    preferences.append(&search_open_row);
 
     append_heading(&preferences, "MOTION");
     let (motion_row, reduce_motion) = settings_option(
@@ -180,20 +192,46 @@ fn keybindings_page() -> gtk::Widget {
         ("Go to parent", "H / ←"),
         ("Edit location", "Ctrl + L"),
         ("Toggle sidebar", "Ctrl + B"),
-        ("Open settings", "Ctrl + ,"),
     ] {
-        let row = gtk::Box::new(gtk::Orientation::Horizontal, 16);
-        row.add_css_class("keybinding-row");
-        let label = gtk::Label::new(Some(label));
-        label.set_xalign(0.0);
-        label.set_hexpand(true);
-        let keys = gtk::Label::new(Some(keys));
-        keys.add_css_class("keybinding-keys");
-        row.append(&label);
-        row.append(&keys);
-        content.append(&row);
+        append_keybinding(&content, label, keys);
     }
-    content.upcast()
+
+    append_heading(&content, "FILE OPERATIONS");
+    for (label, keys) in [
+        ("Cut", "Ctrl + X"),
+        ("Copy", "Ctrl + C"),
+        ("Paste", "Ctrl + V"),
+    ] {
+        append_keybinding(&content, label, keys);
+    }
+
+    append_heading(&content, "APPLICATION");
+    for (label, keys) in [("Search", "Ctrl + K"), ("Open settings", "Ctrl + ,")] {
+        append_keybinding(&content, label, keys);
+    }
+
+    let scroller = gtk::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .vscrollbar_policy(gtk::PolicyType::Automatic)
+        .hexpand(true)
+        .vexpand(true)
+        .child(&content)
+        .build();
+    scroller.add_css_class("settings-keybindings-scroll");
+    scroller.upcast()
+}
+
+fn append_keybinding(content: &gtk::Box, label: &str, keys: &str) {
+    let row = gtk::Box::new(gtk::Orientation::Horizontal, 16);
+    row.add_css_class("keybinding-row");
+    let label = gtk::Label::new(Some(label));
+    label.set_xalign(0.0);
+    label.set_hexpand(true);
+    let keys = gtk::Label::new(Some(keys));
+    keys.add_css_class("keybinding-keys");
+    row.append(&label);
+    row.append(&keys);
+    content.append(&row);
 }
 
 fn theme_page(manager: Rc<ThemeManager>) -> gtk::Widget {

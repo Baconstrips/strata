@@ -836,6 +836,10 @@ impl Browser {
         }
     }
 
+    pub fn open_location(&self, location: Location) {
+        self.emit(BrowserEvent::OpenRequested { location });
+    }
+
     pub fn activate(self: &Rc<Self>, depth: usize, position: usize) {
         self.select(depth, position);
         self.activate_focused();

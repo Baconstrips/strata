@@ -253,6 +253,108 @@ headerbar menubutton.header-action > button:focus-visible image {
   margin: 2px 6px 0;
 }
 
+.search-backdrop {
+  background: alpha(@theme_bg, 0.58);
+}
+
+.search-dialog {
+  background: @theme_surface;
+  border: 1px solid @theme_accent;
+  border-radius: 9px;
+  box-shadow: 0 12px 38px alpha(@theme_bg, 0.82), 0 0 14px alpha(@theme_accent, 0.24);
+  min-height: 452px;
+  max-height: 452px;
+  min-width: 760px;
+  overflow: hidden;
+}
+
+.search-bar {
+  border-bottom: 1px solid alpha(@theme_border, 0.55);
+  min-height: 58px;
+  padding: 0 18px;
+}
+
+.search-field,
+.search-field:focus,
+.search-field:focus-visible {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  color: @theme_text;
+  font-size: 1.08em;
+  outline: none;
+  padding: 0;
+}
+
+.search-field placeholder {
+  color: @theme_dim_text;
+}
+
+.search-status {
+  color: @theme_dim_text;
+  padding: 28px 24px;
+}
+
+.search-results-scroll {
+  background: @theme_surface;
+  min-height: 360px;
+  max-height: 360px;
+}
+
+.search-results,
+.search-results > row {
+  background: transparent;
+}
+
+.search-result {
+  border-bottom: 1px solid alpha(@theme_border, 0.28);
+  color: @theme_text;
+  padding: 0;
+}
+
+.search-result > box {
+  padding: 10px 18px;
+}
+
+.search-result:hover {
+  background: alpha(@theme_muted, 0.38);
+}
+
+.search-result:selected,
+.search-result:focus-visible {
+  background: alpha(@theme_highlight, 0.72);
+  color: @theme_text;
+  outline: 1px solid alpha(@theme_accent, 0.72);
+  outline-offset: -1px;
+}
+
+.search-result-name {
+  color: @theme_text;
+  font-weight: 650;
+}
+
+.search-result-path {
+  color: @theme_dim_text;
+  font-size: 0.84em;
+}
+
+.search-result:selected .search-result-path {
+  color: @theme_text;
+  opacity: 0.72;
+}
+
+.search-footer {
+  background: alpha(@theme_bg, 0.18);
+  border-top: 1px solid alpha(@theme_border, 0.5);
+  min-height: 34px;
+  padding: 0 18px;
+}
+
+.search-hint {
+  color: @theme_dim_text;
+  font-size: 0.78em;
+}
+
 .settings-backdrop {
   background: alpha(@theme_bg, 0.82);
 }
@@ -1749,6 +1851,28 @@ menubutton.column-header-action > button:focus-visible image {
 
 .theme-editor-error {
   color: @theme_accent;
+}
+
+.settings-keybindings-scroll,
+.settings-keybindings-scroll viewport {
+  background: @theme_surface;
+}
+
+.settings-keybindings-scroll scrollbar {
+  background: transparent;
+}
+
+.settings-keybindings-scroll scrollbar slider {
+  background: alpha(@theme_border, 0.62);
+  border: 3px solid transparent;
+  border-radius: 6px;
+  min-width: 8px;
+  min-height: 32px;
+}
+
+.settings-keybindings-scroll scrollbar slider:hover,
+.settings-keybindings-scroll scrollbar slider:active {
+  background: @theme_dim_text;
 }
 
 .keybinding-row {

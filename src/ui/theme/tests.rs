@@ -72,6 +72,7 @@ theme = "azure-glow"
     .expect("legacy preferences should remain valid");
 
     assert!(preferences.single_click_previews);
+    assert!(!preferences.search_open_files_directly);
     assert_eq!(preferences.browser_mode, "columns");
     assert_eq!(preferences.browser_density, "compact");
 }

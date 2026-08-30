@@ -13,7 +13,7 @@ use gtk::{gio, glib, prelude::*};
 use crate::{
     adapters::{LocalFileSource, LocalOperationProvider, LocalPreviewProvider},
     app::{Browser, BrowserEvent},
-    model::Location,
+    model::{EntryKind, FileEntry, Location, MetadataValue},
 };
 
 use super::{
@@ -22,6 +22,7 @@ use super::{
     browser_modes::{BrowserDensity, BrowserMode},
     motion::{animations_enabled, emphasized_deceleration},
     preview::PreviewDrawer,
+    search::SearchDialog,
 };
 
 const SIDEBAR_WIDTH: i32 = 208;
@@ -86,7 +87,9 @@ pub fn present_location(application: &gtk::Application, location: Option<PathBuf
     sidebar_toggle.add_css_class("sidebar-toggle");
     header.pack_start(&sidebar_toggle);
     header.pack_start(&browser.location_widget());
-    let search_button = gtk::Button::builder().tooltip_text("Search").build();
+    let search_button = gtk::Button::builder()
+        .tooltip_text("Search (Ctrl+K)")
+        .build();
     search_button.set_child(Some(&crate::assets::text_icon(
         crate::assets::icons::SEARCH,
         20,
@@ -177,6 +180,78 @@ pub fn present_location(application: &gtk::Application, location: Option<PathBuf
     let window_overlay = gtk::Overlay::new();
     let blurred_root = BlurBin::new(&root);
     window_overlay.set_child(Some(&blurred_root));
+
+    let search_controller = controller.clone();
+    let search_preview = preview.clone();
+    let search_preferences = theme_manager.clone();
+    let activate_search_result = Rc::new(move |item: crate::services::SearchItem| {
+        let location = Location::local(item.path.clone());
+        if item.is_directory {
+            search_preview.close();
+            search_controller.navigate(location);
+            return;
+        }
+        if let Some(parent) = item.path.parent() {
+            search_controller.navigate(Location::local(parent));
+        }
+        if search_preferences.search_open_files_directly() {
+            search_controller.open_location(location);
+        } else {
+            search_preview.show(FileEntry {
+                location,
+                native_name: item.path.file_name().unwrap_or_default().to_os_string(),
+                display_name: item.name,
+                kind: EntryKind::File,
+                size: MetadataValue::Unknown,
+                modified_unix_seconds: MetadataValue::Unknown,
+            });
+        }
+    });
+    let dismissed_search_root = blurred_root.clone();
+    let dismissed_search_button = search_button.clone();
+    let dismiss_search = Rc::new(move || {
+        dismissed_search_root.set_blurred(false);
+        dismissed_search_button.remove_css_class("active");
+    });
+    let search_dialog = SearchDialog::new(activate_search_result, dismiss_search);
+    window_overlay.add_overlay(&search_dialog.widget());
+    let shown_search = search_dialog.clone();
+    let search_browser = controller.clone();
+    let search_blurred_root = blurred_root.clone();
+    search_button.connect_clicked(move |button| {
+        if shown_search.is_visible() {
+            shown_search.hide();
+            return;
+        }
+        let root = search_browser
+            .active_location()
+            .and_then(|location| location.native_path().map(std::path::Path::to_path_buf))
+            .unwrap_or_else(home_directory);
+        button.add_css_class("active");
+        search_blurred_root.set_blurred(true);
+        shown_search.show(root);
+    });
+    let search_action = gio::SimpleAction::new("search", None);
+    let shortcut_search = search_dialog.clone();
+    let shortcut_browser = controller.clone();
+    let shortcut_search_button = search_button.clone();
+    let shortcut_search_root = blurred_root.clone();
+    search_action.connect_activate(move |_, _| {
+        if shortcut_search.is_visible() {
+            shortcut_search.hide();
+        } else {
+            let root = shortcut_browser
+                .active_location()
+                .and_then(|location| location.native_path().map(std::path::Path::to_path_buf))
+                .unwrap_or_else(home_directory);
+            shortcut_search_button.add_css_class("active");
+            shortcut_search_root.set_blurred(true);
+            shortcut_search.show(root);
+        }
+    });
+    window.add_action(&search_action);
+    application.set_accels_for_action("win.search", &["<Control>k"]);
+
     let settings_layer =
         super::settings::build_layer(&browser, &settings, &blurred_root, theme_manager);
     window_overlay.add_overlay(&settings_layer);
@@ -297,6 +372,14 @@ fn install_keyboard_navigation(
         let alt = modifiers.contains(gtk::gdk::ModifierType::ALT_MASK);
         let control = modifiers.contains(gtk::gdk::ModifierType::CONTROL_MASK);
         let shift = modifiers.contains(gtk::gdk::ModifierType::SHIFT_MASK);
+        if control && matches!(key, gtk::gdk::Key::k | gtk::gdk::Key::K) {
+            if let Err(error) =
+                gtk::prelude::WidgetExt::activate_action(&dialog_parent, "win.search", None)
+            {
+                tracing::warn!(%error, "unable to activate global search shortcut");
+            }
+            return glib::Propagation::Stop;
+        }
         if key == gtk::gdk::Key::F2 && view.begin_rename() {
             return glib::Propagation::Stop;
         }
