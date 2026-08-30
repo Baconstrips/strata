@@ -612,6 +612,13 @@ switch:checked slider {
   min-height: 1px;
 }
 
+.sidebar-heading {
+  color: @theme_dim_text;
+  font-size: 0.78em;
+  font-weight: 700;
+  padding: 1px 10px 2px;
+}
+
 paned > separator {
   background: alpha(@theme_border, 0.6);
   min-width: 1px;

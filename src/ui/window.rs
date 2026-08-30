@@ -667,11 +667,18 @@ impl SidebarState {
             }
         }
 
-        let pinned = self.pinned_places.borrow().clone();
+        let pinned = self
+            .pinned_places
+            .borrow()
+            .iter()
+            .filter(|(location, _)| !is_standard_place_location(location))
+            .cloned()
+            .collect::<Vec<_>>();
         if !pinned.is_empty() {
             self.append_separator();
+            self.append_heading("PINNED");
             for (location, name) in pinned {
-                self.append_place(crate::assets::icons::FOLDER, &name, location);
+                self.append_pinned_place(&name, location);
             }
         }
 
@@ -692,6 +699,7 @@ impl SidebarState {
             .collect();
         if !volumes.is_empty() || !mounts.is_empty() {
             self.append_separator();
+            self.append_heading("DEVICES");
             for volume in volumes {
                 self.append_volume(volume);
             }
@@ -703,17 +711,25 @@ impl SidebarState {
     }
 
     fn pin_location(self: &Rc<Self>, location: Location, name: String) {
-        if self
-            .pinned_places
-            .borrow()
-            .iter()
-            .any(|(pinned, _)| pinned == &location)
+        if is_standard_place_location(&location)
+            || self
+                .pinned_places
+                .borrow()
+                .iter()
+                .any(|(pinned, _)| pinned == &location)
         {
             return;
         }
         self.pinned_places.borrow_mut().push((location, name));
         save_pinned_places(&self.pinned_places.borrow());
         self.rebuild();
+    }
+
+    fn unpin_location(self: &Rc<Self>, location: &Location) {
+        if remove_pinned_place(&mut self.pinned_places.borrow_mut(), location) {
+            save_pinned_places(&self.pinned_places.borrow());
+            self.rebuild();
+        }
     }
 
     fn sync_active_place(&self) {
@@ -880,6 +896,13 @@ impl SidebarState {
         self.widget.append(&separator);
     }
 
+    fn append_heading(&self, text: &str) {
+        let heading = gtk::Label::new(Some(text));
+        heading.add_css_class("sidebar-heading");
+        heading.set_xalign(0.0);
+        self.widget.append(&heading);
+    }
+
     fn append_volume(&self, volume: gio::Volume) {
         let name = volume.name().to_string();
         let row = sidebar_button(crate::assets::icons::HARD_DRIVE, &name);
@@ -932,7 +955,62 @@ impl SidebarState {
         self.widget.append(&row);
     }
 
-    fn append_place(&self, icon: &str, name: &str, location: Location) {
+    fn append_pinned_place(self: &Rc<Self>, name: &str, location: Location) {
+        let row = self.append_place(crate::assets::icons::FOLDER, name, location.clone());
+        let menu = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        menu.add_css_class("folder-context-menu");
+        let unpin = sidebar_context_option(crate::assets::icons::PIN, "Unpin", false);
+        let properties = sidebar_context_option(crate::assets::icons::INFO, "Properties", false);
+        menu.append(&unpin);
+        menu.append(&properties);
+        let popover = gtk::Popover::builder()
+            .child(&menu)
+            .autohide(true)
+            .has_arrow(false)
+            .build();
+        popover.add_css_class("folder-context-popover");
+        popover.set_parent(&row);
+
+        let weak_state = Rc::downgrade(self);
+        let unpinned_location = location.clone();
+        let unpin_popover = popover.downgrade();
+        unpin.connect_clicked(move |_| {
+            if let Some(popover) = unpin_popover.upgrade() {
+                popover.popdown();
+            }
+            if let Some(state) = weak_state.upgrade() {
+                state.unpin_location(&unpinned_location);
+            }
+        });
+        let properties_view = self.view.clone();
+        let properties_location = location;
+        let properties_popover = popover.downgrade();
+        properties.connect_clicked(move |_| {
+            if let Some(popover) = properties_popover.upgrade() {
+                popover.popdown();
+            }
+            properties_view.show_location_properties(&properties_location);
+        });
+        let context = gtk::GestureClick::new();
+        context.set_button(3);
+        let weak_popover = popover.downgrade();
+        context.connect_pressed(move |gesture, _, x, y| {
+            gesture.set_state(gtk::EventSequenceState::Claimed);
+            let Some(popover) = weak_popover.upgrade() else {
+                return;
+            };
+            popover.set_pointing_to(Some(&gtk::gdk::Rectangle::new(
+                x.round() as i32,
+                y.round() as i32,
+                1,
+                1,
+            )));
+            popover.popup();
+        });
+        row.add_controller(context);
+    }
+
+    fn append_place(&self, icon: &str, name: &str, location: Location) -> gtk::Button {
         let row = sidebar_button(icon, name);
         row.set_tooltip_text(Some(&location.display_path()));
         self.place_rows
@@ -948,6 +1026,7 @@ impl SidebarState {
             }
         });
         self.widget.append(&row);
+        row
     }
 }
 
@@ -976,6 +1055,31 @@ fn reorder_places(order: &mut Vec<&'static str>, source: &str, target: &str, aft
     };
     order.insert(target_index + usize::from(after), source);
     true
+}
+
+fn remove_pinned_place(places: &mut Vec<(Location, String)>, location: &Location) -> bool {
+    let original_len = places.len();
+    places.retain(|(pinned, _)| pinned != location);
+    places.len() != original_len
+}
+
+fn is_standard_place_location(location: &Location) -> bool {
+    let Some(path) = location.native_path() else {
+        return false;
+    };
+    if path == home_directory() {
+        return true;
+    }
+    [
+        glib::UserDirectory::Desktop,
+        glib::UserDirectory::Documents,
+        glib::UserDirectory::Downloads,
+        glib::UserDirectory::Pictures,
+        glib::UserDirectory::Videos,
+    ]
+    .into_iter()
+    .filter_map(glib::user_special_dir)
+    .any(|standard| standard == path)
 }
 
 fn should_show_standard_place(id: &str, path: &std::path::Path, home: &std::path::Path) -> bool {
@@ -1150,27 +1254,32 @@ fn load_pinned_places() -> Vec<(Location, String)> {
 }
 
 fn parse_pinned_places(contents: &str) -> Vec<(Location, String)> {
-    contents
-        .lines()
-        .filter_map(|line| {
-            let (uri, label) = line
-                .split_once(' ')
-                .map_or((line, None), |(uri, label)| (uri, Some(label)));
-            if uri.is_empty() {
-                return None;
-            }
-            let file = gio::File::for_uri(uri);
-            let location = file
-                .path()
-                .map(Location::local)
-                .unwrap_or_else(|| Location::uri(uri));
-            let name = label
-                .filter(|label| !label.is_empty())
-                .map(str::to_owned)
-                .unwrap_or_else(|| location.display_name());
-            Some((location, name))
-        })
-        .collect()
+    let mut places = Vec::new();
+    for line in contents.lines() {
+        let (uri, label) = line
+            .split_once(' ')
+            .map_or((line, None), |(uri, label)| (uri, Some(label)));
+        if uri.is_empty() {
+            continue;
+        }
+        let file = gio::File::for_uri(uri);
+        let location = file
+            .path()
+            .map(Location::local)
+            .unwrap_or_else(|| Location::uri(uri));
+        if places
+            .iter()
+            .any(|(existing, _): &(Location, String)| existing == &location)
+        {
+            continue;
+        }
+        let name = label
+            .filter(|label| !label.is_empty())
+            .map(str::to_owned)
+            .unwrap_or_else(|| location.display_name());
+        places.push((location, name));
+    }
+    places
 }
 
 fn save_pinned_places(places: &[(Location, String)]) {

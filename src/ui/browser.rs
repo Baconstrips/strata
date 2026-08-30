@@ -441,7 +441,11 @@ impl BrowserView {
     }
 
     pub fn set_view_mode(&self, mode: BrowserMode) {
+        let previous = self.state.mode_views.borrow().mode();
         self.state.mode_views.borrow_mut().set_mode(mode);
+        if mode == BrowserMode::Columns && previous != BrowserMode::Columns {
+            self.state.sync_column_models();
+        }
     }
 
     pub fn set_density(&self, density: BrowserDensity) {
@@ -2208,7 +2212,9 @@ impl ViewState {
                 }
             }
             BrowserEvent::EntriesReplaced { depth, entries } => {
-                if let Some(column) = self.columns.borrow().get(depth).cloned() {
+                if self.mode_views.borrow().mode() == BrowserMode::Columns
+                    && let Some(column) = self.columns.borrow().get(depth).cloned()
+                {
                     if !entries.is_empty() {
                         column.presentation.show_content();
                     }
@@ -2217,6 +2223,22 @@ impl ViewState {
                     column.model.splice(0, column.model.n_items(), &labels);
                     column.entry_count.set(entries.len());
                     set_filter_placeholder(&column, entries.len());
+                }
+            }
+            BrowserEvent::SortingStarted { depth } => {
+                self.overlay.set_cursor_from_name(Some("wait"));
+                if let Some(column) = self.columns.borrow().get(depth) {
+                    column.spinner.set_tooltip_text(Some("Sorting…"));
+                    column.spinner.set_visible(true);
+                    column.spinner.start();
+                }
+            }
+            BrowserEvent::SortingFinished { depth } => {
+                self.overlay.set_cursor(None::<&gtk::gdk::Cursor>);
+                if let Some(column) = self.columns.borrow().get(depth) {
+                    column.spinner.stop();
+                    column.spinner.set_visible(false);
+                    column.spinner.set_tooltip_text(None);
                 }
             }
             BrowserEvent::EntriesSpliced {
@@ -2398,6 +2420,29 @@ impl ViewState {
             }
         }
         self.refresh_active_path_rows();
+    }
+
+    fn sync_column_models(&self) {
+        for (depth, column) in self.columns.borrow().iter().enumerate() {
+            let Some(snapshot) = self.browser.column_snapshot(depth) else {
+                continue;
+            };
+            let labels = snapshot
+                .entries
+                .iter()
+                .map(entry_model_value)
+                .collect::<Vec<_>>();
+            let labels = labels.iter().map(String::as_str).collect::<Vec<_>>();
+            column.model.splice(0, column.model.n_items(), &labels);
+            column.entry_count.set(snapshot.entries.len());
+            set_filter_placeholder(column, snapshot.entries.len());
+            let positions = snapshot
+                .selected_positions
+                .into_iter()
+                .filter_map(|position| filtered_position_for_source(column, position))
+                .collect::<Vec<_>>();
+            set_column_selections(column, &positions);
+        }
     }
 
     fn refresh_active_path_rows(&self) {
@@ -2657,7 +2702,7 @@ impl ViewState {
             row.add_controller(motion);
 
             let drag = gtk::DragSource::builder()
-                .actions(gtk::gdk::DragAction::MOVE)
+                .actions(gtk::gdk::DragAction::COPY | gtk::gdk::DragAction::MOVE)
                 .build();
             let weak_state_for_drag = weak_state.clone();
             let dragged_item = item.clone();
@@ -3945,7 +3990,7 @@ pub(super) fn install_item_context_menu(
         target.replace(Some((resolved_position, entry.clone())));
         let entries = state.browser.selected_entries();
         preview.set_visible(entry_supports_quick_preview(&entry));
-        pin.set_sensitive(entry.is_directory() && !is_trash_location(&entry.location));
+        pin.set_visible(entry.is_directory() && !is_trash_location(&entry.location));
         if entries.len() > 1 {
             heading.set_text(&format!("{} items selected", entries.len()));
             summary.set_text(&selected_items_summary(&entries));
@@ -4360,14 +4405,9 @@ fn transfer_dropped_files(
     value: &glib::Value,
     destination: Location,
 ) -> bool {
-    let Ok(files) = value.get::<gtk::gdk::FileList>() else {
+    let Some(sources) = locations_from_file_list_value(value) else {
         return false;
     };
-    let sources = files
-        .files()
-        .iter()
-        .map(location_for_gio_file)
-        .collect::<Vec<_>>();
     if sources.is_empty() {
         return false;
     }
@@ -4393,6 +4433,16 @@ fn preferred_file_drop_action(actions: gtk::gdk::DragAction, local: bool) -> gtk
     } else {
         gtk::gdk::DragAction::empty()
     }
+}
+
+pub(super) fn locations_from_file_list_value(value: &glib::Value) -> Option<Vec<Location>> {
+    let files = value.get::<gtk::gdk::FileList>().ok()?;
+    let locations = files
+        .files()
+        .iter()
+        .map(location_for_gio_file)
+        .collect::<Vec<_>>();
+    (!locations.is_empty()).then_some(locations)
 }
 
 pub(super) fn location_for_gio_file(file: &gio::File) -> Location {

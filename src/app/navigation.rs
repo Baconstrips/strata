@@ -371,7 +371,7 @@ impl NavigationState {
         column.preferences = preferences;
         column
             .entries
-            .sort_by(|left, right| compare_entries(left, right, preferences));
+            .sort_unstable_by(|left, right| compare_entries(left, right, preferences));
         column.selected = selected_location.and_then(|location| {
             column
                 .entries
@@ -680,7 +680,7 @@ fn merge_entries(
     mut incoming: Vec<FileEntry>,
     preferences: ViewPreferences,
 ) -> (Vec<FileEntry>, Vec<EntryInsertion>) {
-    incoming.sort_by(|left, right| compare_entries(left, right, preferences));
+    incoming.sort_unstable_by(|left, right| compare_entries(left, right, preferences));
     if existing.is_empty() {
         let insertion = EntryInsertion {
             position: 0,

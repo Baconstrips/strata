@@ -4,6 +4,7 @@ use std::{
     cell::{Cell, RefCell},
     path::PathBuf,
     rc::{Rc, Weak},
+    time::Duration,
 };
 
 use crate::{
@@ -41,6 +42,12 @@ pub enum BrowserEvent {
     EntriesReplaced {
         depth: usize,
         entries: Vec<FileEntry>,
+    },
+    SortingStarted {
+        depth: usize,
+    },
+    SortingFinished {
+        depth: usize,
     },
     EntriesSpliced {
         depth: usize,
@@ -128,6 +135,7 @@ pub struct Browser {
     deletion_operation: Cell<bool>,
     restoration_operation: Cell<bool>,
     next_request: Cell<u64>,
+    pending_sort: Cell<Option<(u64, usize)>>,
     preferences: Cell<ViewPreferences>,
     observers: RefCell<Vec<Observer>>,
 }
@@ -146,6 +154,7 @@ impl Browser {
             deletion_operation: Cell::new(false),
             restoration_operation: Cell::new(false),
             next_request: Cell::new(1),
+            pending_sort: Cell::new(None),
             preferences: Cell::new(ViewPreferences::default()),
             observers: RefCell::new(Vec::new()),
         })
@@ -339,25 +348,30 @@ impl Browser {
         }
     }
 
-    pub fn set_sort_key(&self, depth: usize, sort_key: SortKey) {
-        self.apply_column_preferences(depth, |preferences| preferences.sort_key = sort_key);
+    pub fn set_sort_key(self: &Rc<Self>, depth: usize, sort_key: SortKey) {
+        self.apply_column_preferences(depth, move |preferences| preferences.sort_key = sort_key);
     }
 
-    pub fn set_sort(&self, depth: usize, sort_key: SortKey, sort_direction: SortDirection) {
-        self.apply_column_preferences(depth, |preferences| {
+    pub fn set_sort(
+        self: &Rc<Self>,
+        depth: usize,
+        sort_key: SortKey,
+        sort_direction: SortDirection,
+    ) {
+        self.apply_column_preferences(depth, move |preferences| {
             preferences.sort_key = sort_key;
             preferences.sort_direction = sort_direction;
         });
     }
 
-    pub fn set_sort_direction(&self, depth: usize, sort_direction: SortDirection) {
-        self.apply_column_preferences(depth, |preferences| {
+    pub fn set_sort_direction(self: &Rc<Self>, depth: usize, sort_direction: SortDirection) {
+        self.apply_column_preferences(depth, move |preferences| {
             preferences.sort_direction = sort_direction;
         });
     }
 
-    pub fn set_folders_first(&self, depth: usize, folders_first: bool) {
-        self.apply_column_preferences(depth, |preferences| {
+    pub fn set_folders_first(self: &Rc<Self>, depth: usize, folders_first: bool) {
+        self.apply_column_preferences(depth, move |preferences| {
             preferences.folders_first = folders_first;
         });
     }
@@ -385,25 +399,56 @@ impl Browser {
         }
     }
 
-    fn apply_column_preferences(&self, depth: usize, update: impl FnOnce(&mut ViewPreferences)) {
-        let result = {
-            let mut state = self.state.borrow_mut();
-            let Some(mut preferences) = state.column_preferences(depth) else {
+    fn apply_column_preferences(
+        self: &Rc<Self>,
+        depth: usize,
+        update: impl FnOnce(&mut ViewPreferences) + 'static,
+    ) {
+        if self.state.borrow().column_preferences(depth).is_none() {
+            return;
+        }
+        let generation = self
+            .pending_sort
+            .get()
+            .map_or(1, |(generation, _)| generation.saturating_add(1));
+        if let Some((_, previous_depth)) = self.pending_sort.replace(Some((generation, depth))) {
+            self.emit(BrowserEvent::SortingFinished {
+                depth: previous_depth,
+            });
+        }
+        self.emit(BrowserEvent::SortingStarted { depth });
+        let weak = Rc::downgrade(self);
+        gio::glib::timeout_add_local_once(Duration::from_millis(16), move || {
+            let Some(browser) = weak.upgrade() else {
                 return;
             };
-            update(&mut preferences);
-            state.set_column_preferences(depth, preferences)
-        };
-        if let Some((entries, focused, positions)) = result {
-            self.emit(BrowserEvent::EntriesReplaced { depth, entries });
-            if let Some(focused) = focused {
-                self.emit(BrowserEvent::SelectionSetChanged {
-                    depth,
-                    positions,
-                    focused,
-                });
+            if browser.pending_sort.get() != Some((generation, depth)) {
+                return;
             }
-        }
+            let result = {
+                let mut state = browser.state.borrow_mut();
+                let Some(mut preferences) = state.column_preferences(depth) else {
+                    drop(state);
+                    browser.pending_sort.set(None);
+                    browser.emit(BrowserEvent::SortingFinished { depth });
+                    return;
+                };
+                update(&mut preferences);
+                state.set_column_preferences(depth, preferences)
+            };
+            if let Some((entries, focused, positions)) = result {
+                browser.emit(BrowserEvent::EntriesReplaced { depth, entries });
+                if let Some(focused) = focused {
+                    browser.emit(BrowserEvent::SelectionSetChanged {
+                        depth,
+                        positions,
+                        focused,
+                    });
+                }
+            }
+            browser.pending_sort.set(None);
+            browser.emit(BrowserEvent::SortingFinished { depth });
+        });
     }
 
     pub fn back(self: &Rc<Self>) {

@@ -77,6 +77,23 @@ fn quick_preview_is_offered_only_for_supported_files() {
 }
 
 #[test]
+fn incoming_file_lists_preserve_local_and_remote_locations() {
+    let files = gtk::gdk::FileList::from_array(&[
+        gio::File::for_path("/fixture/photo.raw"),
+        gio::File::for_uri("sftp://host.example/home/user/video.mp4"),
+    ]);
+    let value = files.to_value();
+
+    assert_eq!(
+        locations_from_file_list_value(&value),
+        Some(vec![
+            Location::local("/fixture/photo.raw"),
+            Location::uri("sftp://host.example/home/user/video.mp4"),
+        ])
+    );
+}
+
+#[test]
 fn local_file_drops_prefer_move_while_external_drops_prefer_copy() {
     let both = gtk::gdk::DragAction::COPY | gtk::gdk::DragAction::MOVE;
 

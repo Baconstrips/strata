@@ -2,7 +2,10 @@
 
 use std::path::Path;
 
-use super::{parse_pinned_places, reorder_places, should_show_standard_place};
+use super::{
+    is_standard_place_location, parse_pinned_places, remove_pinned_place, reorder_places,
+    should_show_standard_place,
+};
 
 #[test]
 fn places_can_move_before_an_earlier_item() {
@@ -40,7 +43,7 @@ fn invalid_place_reorders_leave_the_order_unchanged() {
 #[test]
 fn gtk_bookmarks_become_native_and_remote_pinned_places() {
     let places = parse_pinned_places(
-        "file:///home/user/Projects Work\nsftp://host.example/home/user Remote\n",
+        "file:///home/user/Projects Work\nsftp://host.example/home/user Remote\nfile:///home/user/Projects Duplicate\n",
     );
 
     assert_eq!(
@@ -53,6 +56,28 @@ fn gtk_bookmarks_become_native_and_remote_pinned_places() {
         Some("sftp://host.example/home/user")
     );
     assert_eq!(places[1].1, "Remote");
+    assert_eq!(places.len(), 2);
+}
+
+#[test]
+fn pinned_places_can_be_removed_by_location() {
+    let removed = crate::model::Location::local("/home/user/Removed");
+    let retained = crate::model::Location::local("/home/user/Retained");
+    let mut places = vec![
+        (removed.clone(), "Removed".to_owned()),
+        (retained.clone(), "Retained".to_owned()),
+    ];
+
+    assert!(remove_pinned_place(&mut places, &removed));
+    assert_eq!(places, vec![(retained, "Retained".to_owned())]);
+    assert!(!remove_pinned_place(&mut places, &removed));
+}
+
+#[test]
+fn home_is_already_a_standard_sidebar_location() {
+    assert!(is_standard_place_location(&crate::model::Location::local(
+        super::home_directory()
+    )));
 }
 
 #[test]

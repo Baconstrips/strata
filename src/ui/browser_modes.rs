@@ -372,6 +372,20 @@ impl ModeViews {
                     replace_entries(pane, entries);
                 }
             }
+            BrowserEvent::SortingStarted { depth } => {
+                for pane in self.panes_at(*depth) {
+                    pane.spinner.set_tooltip_text(Some("Sorting…"));
+                    pane.spinner.set_visible(true);
+                    pane.spinner.start();
+                }
+            }
+            BrowserEvent::SortingFinished { depth } => {
+                for pane in self.panes_at(*depth) {
+                    pane.spinner.stop();
+                    pane.spinner.set_visible(false);
+                    pane.spinner.set_tooltip_text(None);
+                }
+            }
             BrowserEvent::EntriesSpliced { depth, splices, .. } => {
                 for pane in self.panes_at(*depth) {
                     for splice in splices {
@@ -389,6 +403,7 @@ impl ModeViews {
             BrowserEvent::ColumnReloaded { depth } => {
                 for pane in self.panes_at(*depth) {
                     pane.model.splice(0, pane.model.n_items(), &[]);
+                    pane.spinner.set_visible(true);
                     pane.spinner.start();
                     pane.stack.set_visible_child_name("loading");
                 }
@@ -396,6 +411,7 @@ impl ModeViews {
             BrowserEvent::LoadFinished { depth } => {
                 for pane in self.panes_at(*depth) {
                     pane.spinner.stop();
+                    pane.spinner.set_visible(false);
                     show_count(pane);
                 }
             }
@@ -458,18 +474,21 @@ impl ModeViews {
     }
 
     fn panes_at(&self, depth: usize) -> Vec<&Pane> {
-        let mut panes = Vec::with_capacity(2);
-        if let Some(pane) = self.grid_panes.iter().find(|pane| pane.depth == depth) {
-            panes.push(pane);
+        match self.mode {
+            BrowserMode::Columns => Vec::new(),
+            BrowserMode::Grid => self
+                .grid_panes
+                .iter()
+                .find(|pane| pane.depth == depth)
+                .into_iter()
+                .collect(),
+            BrowserMode::Explorer => self
+                .explorer_pane
+                .as_ref()
+                .filter(|pane| pane.depth == depth)
+                .into_iter()
+                .collect(),
         }
-        if let Some(pane) = self
-            .explorer_pane
-            .as_ref()
-            .filter(|pane| pane.depth == depth)
-        {
-            panes.push(pane);
-        }
-        panes
     }
 
     fn install_context_menu(&self, pane: &Pane) {
@@ -692,6 +711,9 @@ fn build_grid_pane(
         Some(controls.leading.clone().upcast()),
         Some(controls.actions.clone().upcast()),
     );
+    if let Some(destination) = browser.location_at(depth) {
+        install_mode_directory_drop_target(&stack, destination, transfer_handler.clone());
+    }
     content.append(&controls.filter_revealer);
     let filter_query = Rc::new(RefCell::new(String::new()));
     let query = filter_query.clone();
@@ -1179,6 +1201,9 @@ fn build_explorer_pane(
     let navigation = explorer_navigation(&browser);
     let (shell, content, model, stack, status, spinner) =
         pane_base(title, "explorer-pane", Some(navigation.upcast()), None);
+    if let Some(destination) = browser.location_at(depth) {
+        install_mode_directory_drop_target(&stack, destination, transfer_handler.clone());
+    }
     let selection = gtk::MultiSelection::new(Some(model.clone()));
     let syncing_selection = Rc::new(Cell::new(false));
 
@@ -1620,6 +1645,35 @@ fn install_grid_peek(
     card.add_controller(motion);
 }
 
+fn install_mode_directory_drop_target(
+    widget: &impl IsA<gtk::Widget>,
+    destination: Location,
+    transfer_handler: TransferHandlerSlot,
+) {
+    widget.add_css_class("file-drop-zone");
+    let drop = gtk::DropTarget::new(
+        gtk::gdk::FileList::static_type(),
+        gtk::gdk::DragAction::COPY | gtk::gdk::DragAction::MOVE,
+    );
+    drop.connect_enter(|target, _, _| super::browser::file_drop_action(target));
+    drop.connect_motion(|target, _, _| super::browser::file_drop_action(target));
+    drop.connect_drop(move |target, value, _, _| {
+        let Some(sources) = super::browser::locations_from_file_list_value(value) else {
+            return false;
+        };
+        let Some(handler) = transfer_handler.borrow().clone() else {
+            return false;
+        };
+        handler(
+            destination.clone(),
+            sources,
+            super::browser::file_drop_action(target) == gtk::gdk::DragAction::MOVE,
+        );
+        true
+    });
+    widget.add_controller(drop);
+}
+
 fn install_explorer_drag_drop(
     row: &gtk::Box,
     item: &gtk::ListItem,
@@ -1629,7 +1683,7 @@ fn install_explorer_drag_drop(
     position_map: Option<(gtk::StringList, gtk::FilterListModel)>,
 ) {
     let drag = gtk::DragSource::builder()
-        .actions(gtk::gdk::DragAction::MOVE)
+        .actions(gtk::gdk::DragAction::COPY | gtk::gdk::DragAction::MOVE)
         .build();
     drag.set_propagation_phase(gtk::PropagationPhase::Capture);
     let dragged_item = item.clone();
@@ -1723,17 +1777,9 @@ fn install_explorer_drag_drop(
         else {
             return false;
         };
-        let Ok(files) = value.get::<gtk::gdk::FileList>() else {
+        let Some(sources) = super::browser::locations_from_file_list_value(value) else {
             return false;
         };
-        let sources = files
-            .files()
-            .iter()
-            .map(super::browser::location_for_gio_file)
-            .collect::<Vec<_>>();
-        if sources.is_empty() {
-            return false;
-        }
         let Some(handler) = transfer_handler.borrow().clone() else {
             return false;
         };
