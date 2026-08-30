@@ -194,6 +194,7 @@ pub fn present_location(application: &gtk::Application, location: Option<PathBuf
     });
     window.add_controller(settings_shortcut);
     window.set_child(Some(&window_overlay));
+    install_modal_focus_trap(&window);
     install_keyboard_navigation(&window, &browser, &sidebar_toggle, &preview, &blurred_root);
     browser.navigate(location.unwrap_or_else(home_directory));
 
@@ -280,6 +281,15 @@ fn install_keyboard_navigation(
         let Some(browser) = weak_browser.upgrade() else {
             return glib::Propagation::Proceed;
         };
+        if let Some(layer) = visible_modal_layer(&dialog_parent) {
+            let focus_is_inside = gtk::prelude::RootExt::focus(&dialog_parent)
+                .is_some_and(|focus| focus == layer || focus.is_ancestor(&layer));
+            if !focus_is_inside {
+                layer.grab_focus();
+                return glib::Propagation::Stop;
+            }
+            return glib::Propagation::Proceed;
+        }
         let alt = modifiers.contains(gtk::gdk::ModifierType::ALT_MASK);
         let control = modifiers.contains(gtk::gdk::ModifierType::CONTROL_MASK);
         let shift = modifiers.contains(gtk::gdk::ModifierType::SHIFT_MASK);
@@ -384,6 +394,31 @@ fn install_keyboard_navigation(
     window.add_controller(keys);
 }
 
+fn visible_modal_layer(window: &gtk::ApplicationWindow) -> Option<gtk::Widget> {
+    let overlay = window.child().and_downcast::<gtk::Overlay>()?;
+    let mut child = overlay.first_child();
+    while let Some(widget) = child {
+        if widget.is_visible() && widget.has_css_class("app-modal-layer") {
+            return Some(widget);
+        }
+        child = widget.next_sibling();
+    }
+    None
+}
+
+fn install_modal_focus_trap(window: &gtk::ApplicationWindow) {
+    window.connect_focus_widget_notify(|window| {
+        let Some(layer) = visible_modal_layer(window) else {
+            return;
+        };
+        let focus_is_inside = gtk::prelude::RootExt::focus(window)
+            .is_some_and(|focus| focus == layer || focus.is_ancestor(&layer));
+        if !focus_is_inside {
+            layer.grab_focus();
+        }
+    });
+}
+
 fn show_delete_confirmation(
     parent: &gtk::ApplicationWindow,
     root: &BlurBin,
@@ -391,10 +426,16 @@ fn show_delete_confirmation(
     entries: Vec<crate::model::FileEntry>,
     permanent: bool,
 ) {
+    let Some(window_overlay) = parent.child().and_downcast::<gtk::Overlay>() else {
+        return;
+    };
     root.set_blurred(true);
 
     let content = gtk::Box::new(gtk::Orientation::Vertical, 18);
+    content.add_css_class("delete-confirmation");
     content.add_css_class("delete-confirmation-content");
+    content.set_halign(gtk::Align::Center);
+    content.set_valign(gtk::Align::Center);
     let question = gtk::Label::new(Some("Are you sure you want to delete these files?"));
     question.add_css_class("delete-confirmation-title");
     question.set_xalign(0.0);
@@ -435,40 +476,53 @@ fn show_delete_confirmation(
     actions.append(&confirm);
     content.append(&actions);
 
-    let dialog = gtk::Window::builder()
-        .decorated(false)
-        .modal(true)
-        .resizable(false)
-        .transient_for(parent)
-        .child(&content)
-        .build();
-    dialog.add_css_class("delete-confirmation");
+    let layer = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    layer.add_css_class("app-modal-layer");
+    layer.add_css_class("modal-backdrop");
+    layer.set_halign(gtk::Align::Fill);
+    layer.set_valign(gtk::Align::Fill);
+    layer.set_hexpand(true);
+    layer.set_vexpand(true);
+    layer.set_focusable(true);
+    let top = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    top.set_vexpand(true);
+    let bottom = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    bottom.set_vexpand(true);
+    layer.append(&top);
+    layer.append(&content);
+    layer.append(&bottom);
+    window_overlay.add_overlay(&layer);
 
-    let closed_dialog = dialog.clone();
-    cancel.connect_clicked(move |_| closed_dialog.close());
-    let confirmed_dialog = dialog.clone();
+    let closed_layer = layer.clone();
+    let closed_overlay = window_overlay.clone();
+    let unblurred_root = root.clone();
+    cancel.connect_clicked(move |_| {
+        closed_overlay.remove_overlay(&closed_layer);
+        unblurred_root.set_blurred(false);
+    });
+    let confirmed_layer = layer.clone();
+    let confirmed_overlay = window_overlay.clone();
+    let confirmed_root = root.clone();
     let confirmed_browser = browser.clone();
     confirm.connect_clicked(move |_| {
         confirmed_browser.delete(entries.clone(), permanent);
-        confirmed_dialog.close();
-    });
-    let unblurred_root = root.clone();
-    dialog.connect_close_request(move |_| {
-        unblurred_root.set_blurred(false);
-        glib::Propagation::Proceed
+        confirmed_overlay.remove_overlay(&confirmed_layer);
+        confirmed_root.set_blurred(false);
     });
     let escape = gtk::EventControllerKey::new();
-    let escaped_dialog = dialog.clone();
+    let escaped_layer = layer.clone();
+    let escaped_overlay = window_overlay;
+    let escaped_root = root.clone();
     escape.connect_key_pressed(move |_, key, _, _| {
         if key == gtk::gdk::Key::Escape {
-            escaped_dialog.close();
+            escaped_overlay.remove_overlay(&escaped_layer);
+            escaped_root.set_blurred(false);
             glib::Propagation::Stop
         } else {
             glib::Propagation::Proceed
         }
     });
-    dialog.add_controller(escape);
-    dialog.present();
+    layer.add_controller(escape);
     cancel.grab_focus();
 }
 

@@ -594,14 +594,16 @@ impl ViewState {
     }
 
     fn show_properties(self: &Rc<Self>, location: Location, entry: Option<FileEntry>) {
-        let Some(parent) = self.overlay.root().and_downcast::<gtk::Window>() else {
+        let Some(window_overlay) = self
+            .overlay
+            .root()
+            .and_downcast::<gtk::Window>()
+            .and_then(|window| window.child())
+            .and_downcast::<gtk::Overlay>()
+        else {
             return;
         };
-        let blurred_root = parent
-            .child()
-            .and_downcast::<gtk::Overlay>()
-            .and_then(|overlay| overlay.child())
-            .and_downcast::<BlurBin>();
+        let blurred_root = window_overlay.child().and_downcast::<BlurBin>();
         if let Some(root) = blurred_root.as_ref() {
             root.set_blurred(true);
         }
@@ -616,7 +618,10 @@ impl ViewState {
             .unwrap_or(crate::assets::icons::FOLDER);
 
         let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        content.add_css_class("properties-dialog");
         content.add_css_class("properties-content");
+        content.set_halign(gtk::Align::Center);
+        content.set_valign(gtk::Align::Center);
         let header = gtk::Box::new(gtk::Orientation::Horizontal, 12);
         header.add_css_class("properties-header");
         let icon = crate::assets::primary_icon(icon_name, 30);
@@ -708,32 +713,28 @@ impl ViewState {
         actions.append(&copy_path);
         content.append(&actions);
 
-        let dialog = gtk::Window::builder()
-            .decorated(false)
-            .modal(true)
-            .resizable(false)
-            .transient_for(&parent)
-            .child(&content)
-            .build();
-        dialog.add_css_class("properties-dialog");
-        if let Some(root) = blurred_root {
-            dialog.connect_close_request(move |_| {
-                root.set_blurred(false);
-                glib::Propagation::Proceed
-            });
-        }
-        let closing = dialog.clone();
-        close.connect_clicked(move |_| closing.close());
-        let opening = dialog.clone();
+        let layer = modal_layer(&content);
+        window_overlay.add_overlay(&layer);
+        let closing_layer = layer.clone();
+        let closing_overlay = window_overlay.clone();
+        let closing_root = blurred_root.clone();
+        close.connect_clicked(move |_| {
+            dismiss_modal_layer(&closing_layer, &closing_overlay, closing_root.as_ref());
+        });
+        let opening_layer = layer.clone();
+        let opening_overlay = window_overlay.clone();
+        let opening_root = blurred_root.clone();
         let opening_location = location.clone();
         open.connect_clicked(move |_| {
-            open_location(&opening_location, &opening);
-            opening.close();
+            open_location(&opening_location, &opening_layer);
+            dismiss_modal_layer(&opening_layer, &opening_overlay, opening_root.as_ref());
         });
-        let renamed_dialog = dialog.clone();
+        let renamed_layer = layer.clone();
+        let renamed_overlay = window_overlay.clone();
+        let renamed_root = blurred_root.clone();
         let weak = Rc::downgrade(self);
         rename.connect_clicked(move |_| {
-            renamed_dialog.close();
+            dismiss_modal_layer(&renamed_layer, &renamed_overlay, renamed_root.as_ref());
             let weak = weak.clone();
             glib::idle_add_local_once(move || {
                 if let Some(state) = weak.upgrade() {
@@ -751,17 +752,19 @@ impl ViewState {
             }
         });
         let escape = gtk::EventControllerKey::new();
-        let escaped = dialog.clone();
+        let escaped_layer = layer.clone();
+        let escaped_overlay = window_overlay.clone();
+        let escaped_root = blurred_root.clone();
         escape.connect_key_pressed(move |_, key, _, _| {
             if key == gtk::gdk::Key::Escape {
-                escaped.close();
+                dismiss_modal_layer(&escaped_layer, &escaped_overlay, escaped_root.as_ref());
                 glib::Propagation::Stop
             } else {
                 glib::Propagation::Proceed
             }
         });
-        dialog.add_controller(escape);
-        dialog.present();
+        layer.add_controller(escape);
+        layer.grab_focus();
 
         let file = gio_file_for_location(&location);
         glib::MainContext::default().spawn_local(async move {
@@ -2837,6 +2840,32 @@ fn animate_horizontal_scroll(
             glib::ControlFlow::Continue
         }
     });
+}
+
+fn modal_layer(content: &impl IsA<gtk::Widget>) -> gtk::Box {
+    let layer = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    layer.add_css_class("app-modal-layer");
+    layer.add_css_class("modal-backdrop");
+    layer.set_halign(gtk::Align::Fill);
+    layer.set_valign(gtk::Align::Fill);
+    layer.set_hexpand(true);
+    layer.set_vexpand(true);
+    layer.set_focusable(true);
+    let top = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    top.set_vexpand(true);
+    let bottom = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    bottom.set_vexpand(true);
+    layer.append(&top);
+    layer.append(content);
+    layer.append(&bottom);
+    layer
+}
+
+fn dismiss_modal_layer(layer: &gtk::Box, overlay: &gtk::Overlay, root: Option<&BlurBin>) {
+    overlay.remove_overlay(layer);
+    if let Some(root) = root {
+        root.set_blurred(false);
+    }
 }
 
 fn gio_file_for_location(location: &Location) -> gio::File {

@@ -228,7 +228,15 @@ headerbar menubutton.header-action > button:checked {
   background: alpha(@theme_bg, 0.82);
 }
 
-window.delete-confirmation {
+.modal-backdrop,
+.modal-backdrop:focus,
+.modal-backdrop:focus-visible,
+.modal-backdrop:focus-within {
+  background: alpha(@theme_bg, 0.08);
+  outline: none;
+}
+
+.delete-confirmation {
   background: @theme_surface;
   border: 1px solid alpha(@theme_accent, 0.22);
   border-radius: 7px;
@@ -741,7 +749,7 @@ menubutton.column-header-action > button:checked image {
   color: @theme_text;
 }
 
-window.properties-dialog {
+.properties-dialog {
   background: @theme_surface;
   border: 1px solid alpha(@theme_accent, 0.36);
   border-radius: 7px;
