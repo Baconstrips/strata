@@ -1676,9 +1676,31 @@ menubutton.column-header-action > button:focus-visible image {
   background: @theme_surface;
   border: 1px solid @theme_accent;
   border-radius: 4px;
+  box-shadow: none;
+  caret-color: @theme_accent;
   color: @theme_text;
   min-height: 22px;
   padding: 0 4px;
+}
+
+.inline-rename:focus,
+.inline-rename:focus-visible,
+.inline-rename:focus-within {
+  border-color: @theme_accent;
+  box-shadow: 0 0 0 1px alpha(@theme_accent, 0.45);
+  outline: none;
+}
+
+.inline-rename.error {
+  border-color: @theme_danger;
+  caret-color: @theme_danger;
+}
+
+.inline-rename.error:focus,
+.inline-rename.error:focus-visible,
+.inline-rename.error:focus-within {
+  border-color: @theme_danger;
+  box-shadow: 0 0 0 1px alpha(@theme_danger, 0.45);
 }
 
 .inline-rename selection {
@@ -2288,11 +2310,6 @@ menubutton.grid-thumbnail-menu > button:focus-visible {
 }
 
 .explorer-list row:focus-visible {
-  outline: 2px solid @theme_accent;
-  outline-offset: -2px;
-}
-
-.explorer-list.creating-folder row:focus-visible {
   outline: none;
 }
 
