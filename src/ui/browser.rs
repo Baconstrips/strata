@@ -448,6 +448,15 @@ impl BrowserView {
         }
     }
 
+    pub fn confirm_delete(&self, permanent: bool) -> bool {
+        let entries = self.state.browser.selected_entries();
+        if entries.is_empty() {
+            return false;
+        }
+        self.state.show_delete_confirmation(entries, permanent);
+        true
+    }
+
     pub fn filter_has_focus(&self) -> bool {
         self.state
             .columns
@@ -583,6 +592,176 @@ impl ViewState {
                 state.browser.paste(destination, sources);
             }
         });
+    }
+
+    fn show_delete_confirmation(self: &Rc<Self>, entries: Vec<FileEntry>, permanent: bool) {
+        let Some(window_overlay) = self
+            .overlay
+            .root()
+            .and_downcast::<gtk::Window>()
+            .and_then(|window| window.child())
+            .and_downcast::<gtk::Overlay>()
+        else {
+            return;
+        };
+        let blurred_root = window_overlay.child().and_downcast::<BlurBin>();
+        if let Some(root) = blurred_root.as_ref() {
+            root.set_blurred(true);
+        }
+
+        let count = entries.len();
+        let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        content.add_css_class("delete-confirmation");
+        content.add_css_class("delete-confirmation-content");
+        content.set_halign(gtk::Align::Center);
+        content.set_valign(gtk::Align::Center);
+
+        let header = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+        header.add_css_class("delete-confirmation-header");
+        let symbol = gtk::CenterBox::new();
+        symbol.add_css_class("delete-confirmation-symbol");
+        symbol.set_size_request(40, 40);
+        symbol.set_hexpand(false);
+        let symbol_icon = crate::assets::danger_icon(crate::assets::icons::TRASH, 21);
+        symbol.set_center_widget(Some(&symbol_icon));
+        let heading = gtk::Box::new(gtk::Orientation::Vertical, 1);
+        heading.set_hexpand(true);
+        let question = gtk::Label::new(Some(&if permanent {
+            format!("Permanently delete {}?", item_count_label(count))
+        } else {
+            format!("Move {} to trash?", item_count_label(count))
+        }));
+        question.add_css_class("delete-confirmation-title");
+        question.set_xalign(0.0);
+        let subtitle = gtk::Label::new(Some(&entry_kind_summary(&entries)));
+        subtitle.add_css_class("delete-confirmation-subtitle");
+        subtitle.set_xalign(0.0);
+        heading.append(&question);
+        heading.append(&subtitle);
+        let close = gtk::Button::new();
+        close.add_css_class("delete-confirmation-close");
+        close.set_tooltip_text(Some("Cancel"));
+        close.set_child(Some(&crate::assets::text_icon(crate::assets::icons::X, 16)));
+        header.append(&symbol);
+        header.append(&heading);
+        header.append(&close);
+        content.append(&header);
+
+        let body = gtk::Box::new(gtk::Orientation::Vertical, 12);
+        body.add_css_class("delete-confirmation-body");
+        let files = gtk::Box::new(gtk::Orientation::Vertical, 3);
+        files.add_css_class("delete-confirmation-files");
+        for entry in &entries {
+            let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+            row.add_css_class("delete-confirmation-file");
+            let icon = crate::assets::primary_icon(entry_icon(entry), 16);
+            let name = gtk::Label::new(Some(&entry.display_name));
+            name.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
+            name.set_hexpand(true);
+            name.set_xalign(0.0);
+            name.set_tooltip_text(Some(&entry.location.display_path()));
+            let metadata = gtk::Label::new(Some(&if entry.is_directory() {
+                "Folder".to_owned()
+            } else {
+                match entry.size {
+                    crate::model::MetadataValue::Known(size) => format_file_size(size),
+                    crate::model::MetadataValue::Unknown
+                    | crate::model::MetadataValue::Unavailable => "—".to_owned(),
+                }
+            }));
+            metadata.add_css_class("delete-confirmation-file-metadata");
+            row.append(&icon);
+            row.append(&name);
+            row.append(&metadata);
+            files.append(&row);
+        }
+        let file_scroller = gtk::ScrolledWindow::builder()
+            .child(&files)
+            .hscrollbar_policy(gtk::PolicyType::Never)
+            .vscrollbar_policy(if count > 10 {
+                gtk::PolicyType::Automatic
+            } else {
+                gtk::PolicyType::Never
+            })
+            .max_content_height(256)
+            .propagate_natural_height(true)
+            .build();
+        file_scroller.add_css_class("delete-confirmation-list");
+        body.append(&file_scroller);
+        let explanation = gtk::Label::new(Some(if permanent {
+            "These items will be permanently deleted. This action cannot be undone."
+        } else {
+            "The items will be moved to trash. You can restore them later."
+        }));
+        explanation.add_css_class("delete-confirmation-explanation");
+        explanation.set_wrap(true);
+        explanation.set_xalign(0.0);
+        body.append(&explanation);
+        content.append(&body);
+
+        let actions = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        actions.add_css_class("delete-confirmation-actions");
+        actions.set_halign(gtk::Align::End);
+        let cancel = gtk::Button::with_label("Cancel");
+        cancel.add_css_class("delete-confirmation-cancel");
+        let confirm_label = if permanent {
+            format!("Permanently delete {}", item_count_label(count))
+        } else {
+            format!("Move {}", item_count_label(count))
+        };
+        let confirm_content = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        confirm_content.append(&crate::assets::danger_icon(crate::assets::icons::TRASH, 15));
+        confirm_content.append(&gtk::Label::new(Some(&confirm_label)));
+        let confirm = gtk::Button::builder().child(&confirm_content).build();
+        confirm.add_css_class("delete-confirmation-delete");
+        actions.append(&cancel);
+        actions.append(&confirm);
+        content.append(&actions);
+
+        let layer = modal_layer(&content);
+        window_overlay.add_overlay(&layer);
+        let cancelled_layer = layer.clone();
+        let cancelled_overlay = window_overlay.clone();
+        let cancelled_root = blurred_root.clone();
+        cancel.connect_clicked(move |_| {
+            dismiss_modal_layer(
+                &cancelled_layer,
+                &cancelled_overlay,
+                cancelled_root.as_ref(),
+            );
+        });
+        let closed_layer = layer.clone();
+        let closed_overlay = window_overlay.clone();
+        let closed_root = blurred_root.clone();
+        close.connect_clicked(move |_| {
+            dismiss_modal_layer(&closed_layer, &closed_overlay, closed_root.as_ref());
+        });
+        let confirmed_layer = layer.clone();
+        let confirmed_overlay = window_overlay.clone();
+        let confirmed_root = blurred_root.clone();
+        let browser = self.browser.clone();
+        confirm.connect_clicked(move |_| {
+            browser.delete(entries.clone(), permanent);
+            dismiss_modal_layer(
+                &confirmed_layer,
+                &confirmed_overlay,
+                confirmed_root.as_ref(),
+            );
+        });
+        let escape = gtk::EventControllerKey::new();
+        let escaped_layer = layer.clone();
+        let escaped_overlay = window_overlay;
+        let escaped_root = blurred_root;
+        escape.connect_key_pressed(move |_, key, _, _| {
+            if key == gtk::gdk::Key::Escape {
+                dismiss_modal_layer(&escaped_layer, &escaped_overlay, escaped_root.as_ref());
+                glib::Propagation::Stop
+            } else {
+                glib::Propagation::Proceed
+            }
+        });
+        layer.add_controller(escape);
+        cancel.grab_focus();
     }
 
     fn show_folder_properties(self: &Rc<Self>, location: &Location) {
@@ -2387,14 +2566,58 @@ fn install_item_context_menu(
     depth: usize,
 ) {
     let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    content.add_css_class("folder-context-menu");
-    let open = context_menu_option("Open", None);
-    let rename = context_menu_option("Rename", Some("F2"));
-    let properties = context_menu_option("Properties", None);
-    content.append(&open);
-    content.append(&rename);
+    content.add_css_class("item-context-menu");
+    let header = gtk::Box::new(gtk::Orientation::Vertical, 2);
+    header.add_css_class("item-context-header");
+    let heading = gtk::Label::new(None);
+    heading.add_css_class("item-context-title");
+    heading.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    heading.set_xalign(0.0);
+    let summary = gtk::Label::new(None);
+    summary.add_css_class("item-context-summary");
+    summary.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    summary.set_xalign(0.0);
+    header.append(&heading);
+    header.append(&summary);
+    content.append(&header);
     content.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
-    content.append(&properties);
+
+    let single = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    let open = item_context_option(crate::assets::icons::EXTERNAL_LINK, "Open", "↵");
+    let preview = item_context_option(crate::assets::icons::EYE, "Quick preview", "Space");
+    let pin = item_context_option(crate::assets::icons::PIN, "Pin to sidebar", "P");
+    pin.set_tooltip_text(Some("Pinned locations are planned"));
+    let copy_path = item_context_option(crate::assets::icons::COPY, "Copy path", "Y");
+    let rename = item_context_option(crate::assets::icons::PENCIL, "Rename", "F2");
+    let cut = item_context_option(crate::assets::icons::SCISSORS, "Cut", "Ctrl+X");
+    let move_to_trash =
+        item_context_danger_option(crate::assets::icons::TRASH, "Move to Trash", "Del");
+    move_to_trash.add_css_class("danger");
+    let properties = item_context_option(crate::assets::icons::INFO, "Properties", "Alt+Enter");
+    single.append(&open);
+    single.append(&preview);
+    single.append(&pin);
+    single.append(&copy_path);
+    single.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
+    single.append(&rename);
+    single.append(&cut);
+    single.append(&move_to_trash);
+    single.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
+    single.append(&properties);
+    content.append(&single);
+
+    let multiple = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    let copy_paths = item_context_option(crate::assets::icons::COPY, "Copy paths", "Y");
+    let cut_multiple = item_context_option(crate::assets::icons::SCISSORS, "Cut", "Ctrl+X");
+    let trash_multiple =
+        item_context_danger_option(crate::assets::icons::TRASH, "Move to Trash", "Del");
+    trash_multiple.add_css_class("danger");
+    multiple.append(&copy_paths);
+    multiple.append(&cut_multiple);
+    multiple.append(&trash_multiple);
+    multiple.set_visible(false);
+    content.append(&multiple);
+
     let popover = gtk::Popover::builder()
         .child(&content)
         .autohide(true)
@@ -2419,6 +2642,42 @@ fn install_item_context_menu(
         }
     });
     let weak = Rc::downgrade(state);
+    let preview_target = target.clone();
+    let preview_popover = popover.downgrade();
+    preview.connect_clicked(move |_| {
+        if let Some(popover) = preview_popover.upgrade() {
+            popover.popdown();
+        }
+        let Some((position, entry)) = preview_target.borrow().clone() else {
+            return;
+        };
+        if let Some(state) = weak.upgrade()
+            && !entry.is_directory()
+        {
+            state.browser.preview(depth, position);
+        }
+    });
+    let pin_popover = popover.downgrade();
+    pin.connect_clicked(move |_| {
+        if let Some(popover) = pin_popover.upgrade() {
+            popover.popdown();
+        }
+    });
+    let weak = Rc::downgrade(state);
+    let copy_target = target.clone();
+    let copy_popover = popover.downgrade();
+    copy_path.connect_clicked(move |_| {
+        if let Some(popover) = copy_popover.upgrade() {
+            popover.popdown();
+        }
+        let Some((_, entry)) = copy_target.borrow().clone() else {
+            return;
+        };
+        if weak.upgrade().is_some() {
+            copy_locations(&[entry]);
+        }
+    });
+    let weak = Rc::downgrade(state);
     let rename_target = target.clone();
     let rename_popover = popover.downgrade();
     rename.connect_clicked(move |_| {
@@ -2436,6 +2695,10 @@ fn install_item_context_menu(
             }
         });
     });
+    connect_context_cut(&cut, &popover, state, &target);
+    connect_context_cut(&cut_multiple, &popover, state, &target);
+    connect_context_trash(&move_to_trash, &popover, state, &target);
+    connect_context_trash(&trash_multiple, &popover, state, &target);
     let weak = Rc::downgrade(state);
     let properties_target = target.clone();
     let properties_popover = popover.downgrade();
@@ -2448,6 +2711,17 @@ fn install_item_context_menu(
         };
         if let Some(state) = weak.upgrade() {
             state.show_entry_properties(entry);
+        }
+    });
+    let weak = Rc::downgrade(state);
+    let paths_target = target.clone();
+    let paths_popover = popover.downgrade();
+    copy_paths.connect_clicked(move |_| {
+        if let Some(popover) = paths_popover.upgrade() {
+            popover.popdown();
+        }
+        if let Some(state) = weak.upgrade() {
+            copy_locations(&context_entries(&state, &paths_target));
         }
     });
 
@@ -2487,8 +2761,30 @@ fn install_item_context_menu(
             return;
         };
         gesture.set_state(gtk::EventSequenceState::Claimed);
-        selection.select_item(filtered_position, true);
-        target.replace(Some((source_position, entry)));
+        if !selection.is_selected(filtered_position) {
+            selection.select_item(filtered_position, true);
+        }
+        let selected_positions = bitset_positions(&selection.selection())
+            .into_iter()
+            .filter_map(|position| source_position_for_filtered(&source, &filtered, position))
+            .collect::<Vec<_>>();
+        state
+            .browser
+            .set_selection(depth, &selected_positions, Some(source_position));
+        target.replace(Some((source_position, entry.clone())));
+        let entries = state.browser.selected_entries();
+        preview.set_sensitive(!entry.is_directory());
+        if entries.len() > 1 {
+            heading.set_text(&format!("{} items selected", entries.len()));
+            summary.set_text(&selected_items_summary(&entries));
+            single.set_visible(false);
+            multiple.set_visible(true);
+        } else {
+            heading.set_text(&entry.display_name);
+            summary.set_text(&compact_display_path(&entry.location));
+            single.set_visible(true);
+            multiple.set_visible(false);
+        }
         let Some(popover) = weak_popover.upgrade() else {
             return;
         };
@@ -2501,6 +2797,127 @@ fn install_item_context_menu(
         popover.popup();
     });
     list.add_controller(click);
+}
+
+fn selected_items_summary(entries: &[FileEntry]) -> String {
+    let mut names = entries
+        .iter()
+        .take(3)
+        .map(|entry| entry.display_name.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    if entries.len() > 3 {
+        names.push_str(", …");
+    }
+    names
+}
+
+fn context_entries(
+    state: &ViewState,
+    target: &RefCell<Option<(usize, FileEntry)>>,
+) -> Vec<FileEntry> {
+    let entries = state.browser.selected_entries();
+    if entries.is_empty() {
+        target
+            .borrow()
+            .as_ref()
+            .map(|(_, entry)| vec![entry.clone()])
+            .unwrap_or_default()
+    } else {
+        entries
+    }
+}
+
+fn connect_context_trash(
+    button: &gtk::Button,
+    popover: &gtk::Popover,
+    state: &Rc<ViewState>,
+    target: &Rc<RefCell<Option<(usize, FileEntry)>>>,
+) {
+    let weak = Rc::downgrade(state);
+    let target = target.clone();
+    let popover = popover.downgrade();
+    button.connect_clicked(move |_| {
+        if let Some(popover) = popover.upgrade() {
+            popover.popdown();
+        }
+        if let Some(state) = weak.upgrade() {
+            let entries = context_entries(&state, &target);
+            state.show_delete_confirmation(entries, false);
+        }
+    });
+}
+
+fn connect_context_cut(
+    button: &gtk::Button,
+    popover: &gtk::Popover,
+    state: &Rc<ViewState>,
+    target: &Rc<RefCell<Option<(usize, FileEntry)>>>,
+) {
+    let weak = Rc::downgrade(state);
+    let target = target.clone();
+    let popover = popover.downgrade();
+    button.connect_clicked(move |_| {
+        if let Some(popover) = popover.upgrade() {
+            popover.popdown();
+        }
+        if let Some(state) = weak.upgrade() {
+            copy_files_to_clipboard(&context_entries(&state, &target));
+        }
+    });
+}
+
+fn copy_locations(entries: &[FileEntry]) {
+    let text = entries
+        .iter()
+        .map(|entry| entry.location.display_path())
+        .collect::<Vec<_>>()
+        .join("\n");
+    if let Some(display) = gtk::gdk::Display::default() {
+        display.clipboard().set_text(&text);
+    }
+}
+
+fn copy_files_to_clipboard(entries: &[FileEntry]) {
+    let files = entries
+        .iter()
+        .map(|entry| gio_file_for_location(&entry.location))
+        .collect::<Vec<_>>();
+    if files.is_empty() {
+        return;
+    }
+    if let Some(display) = gtk::gdk::Display::default() {
+        let _result = display
+            .clipboard()
+            .set_content(Some(&gtk::gdk::ContentProvider::for_value(
+                &gtk::gdk::FileList::from_array(&files).to_value(),
+            )));
+    }
+}
+
+fn item_context_option(icon: &str, label: &str, accelerator: &str) -> gtk::Button {
+    item_context_option_with_icon(crate::assets::text_icon(icon, 15), label, accelerator)
+}
+
+fn item_context_danger_option(icon: &str, label: &str, accelerator: &str) -> gtk::Button {
+    item_context_option_with_icon(crate::assets::danger_icon(icon, 15), label, accelerator)
+}
+
+fn item_context_option_with_icon(icon: gtk::Image, label: &str, accelerator: &str) -> gtk::Button {
+    let button = gtk::Button::new();
+    button.add_css_class("item-context-option");
+    let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    icon.add_css_class("item-context-icon");
+    let title = gtk::Label::new(Some(label));
+    title.set_xalign(0.0);
+    title.set_hexpand(true);
+    let shortcut = gtk::Label::new(Some(accelerator));
+    shortcut.add_css_class("item-context-shortcut");
+    row.append(&icon);
+    row.append(&title);
+    row.append(&shortcut);
+    button.set_child(Some(&row));
+    button
 }
 
 fn context_menu_option(label: &str, accelerator: Option<&str>) -> gtk::Button {
@@ -2840,6 +3257,26 @@ fn animate_horizontal_scroll(
             glib::ControlFlow::Continue
         }
     });
+}
+
+fn item_count_label(count: usize) -> String {
+    if count == 1 {
+        "1 item".to_owned()
+    } else {
+        format!("{count} items")
+    }
+}
+
+fn entry_kind_summary(entries: &[FileEntry]) -> String {
+    let directories = entries.iter().filter(|entry| entry.is_directory()).count();
+    let files = entries.len().saturating_sub(directories);
+    match (files, directories) {
+        (1, 0) => "1 file".to_owned(),
+        (files, 0) => format!("{files} files"),
+        (0, 1) => "1 folder".to_owned(),
+        (0, directories) => format!("{directories} folders"),
+        _ => item_count_label(entries.len()),
+    }
 }
 
 fn modal_layer(content: &impl IsA<gtk::Widget>) -> gtk::Box {

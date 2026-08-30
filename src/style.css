@@ -265,8 +265,19 @@ headerbar menubutton.header-action > button:focus-visible image {
 }
 
 .delete-confirmation-content {
-  min-width: 410px;
-  padding: 24px;
+  min-width: 480px;
+}
+
+.delete-confirmation-header {
+  border-bottom: 1px solid alpha(@theme_border, 0.22);
+  padding: 14px 20px;
+}
+
+.delete-confirmation-symbol {
+  background: alpha(@theme_danger, 0.14);
+  border-radius: 6px;
+  min-height: 40px;
+  min-width: 40px;
 }
 
 .delete-confirmation-title {
@@ -275,31 +286,86 @@ headerbar menubutton.header-action > button:focus-visible image {
   font-weight: 700;
 }
 
+.delete-confirmation-subtitle,
+.delete-confirmation-explanation,
+.delete-confirmation-file-metadata {
+  color: @theme_dim_text;
+}
+
+.delete-confirmation-subtitle {
+  font-size: 0.82em;
+}
+
+.delete-confirmation-close {
+  background: transparent;
+  border: none;
+  border-radius: 5px;
+  box-shadow: none;
+  color: @theme_dim_text;
+  min-height: 28px;
+  min-width: 28px;
+  padding: 4px;
+}
+
+.delete-confirmation-close:hover {
+  background: alpha(@theme_muted, 0.56);
+  color: @theme_text;
+}
+
+.delete-confirmation-close:active {
+  background: alpha(@theme_muted, 0.78);
+  color: @theme_accent;
+}
+
+.delete-confirmation-close:focus-visible {
+  outline: 2px solid alpha(@theme_accent, 0.52);
+  outline-offset: 1px;
+}
+
+.delete-confirmation-body {
+  padding: 8px 20px 10px;
+}
+
 .delete-confirmation-list {
-  background: @theme_bg;
+  background: alpha(@theme_highlight, 0.42);
   border: 1px solid alpha(@theme_border, 0.42);
   border-radius: 5px;
 }
 
+.delete-confirmation-list viewport {
+  background: transparent;
+  border-radius: 5px;
+}
+
 .delete-confirmation-files {
-  background: @theme_bg;
-  padding: 10px 12px;
+  background: transparent;
+  padding: 8px 10px;
 }
 
 .delete-confirmation-file {
-  color: @theme_dim_text;
+  color: @theme_text;
+  min-height: 24px;
+}
+
+.delete-confirmation-file-metadata {
+  font-size: 0.82em;
+}
+
+.delete-confirmation-actions {
+  border-top: 1px solid alpha(@theme_border, 0.22);
+  padding: 10px 20px 12px;
 }
 
 .delete-confirmation-actions button {
   border-radius: 5px;
   box-shadow: none;
-  min-height: 32px;
-  padding: 4px 14px;
+  min-height: 26px;
+  padding: 2px 11px;
 }
 
 .delete-confirmation-cancel {
   background: transparent;
-  border: 1px solid @theme_border;
+  border: 1px solid alpha(@theme_border, 0.54);
   color: @theme_text;
 }
 
@@ -322,25 +388,25 @@ headerbar menubutton.header-action > button:focus-visible image {
 }
 
 .delete-confirmation-delete {
-  background: @theme_danger;
+  background: alpha(@theme_danger, 0.1);
   border: 1px solid @theme_danger;
-  color: @theme_bg;
+  color: @theme_danger;
 }
 
 .delete-confirmation-delete:hover {
-  background: alpha(@theme_danger, 0.86);
+  background: alpha(@theme_danger, 0.18);
   border-color: @theme_danger;
-  color: @theme_bg;
+  color: @theme_danger;
 }
 
 .delete-confirmation-delete:active {
-  background: alpha(@theme_danger, 0.72);
+  background: alpha(@theme_danger, 0.28);
   border-color: @theme_danger;
-  color: @theme_bg;
+  color: @theme_danger;
 }
 
 .delete-confirmation-delete:focus-visible {
-  border-color: @theme_text;
+  border-color: @theme_danger;
   outline: 2px solid alpha(@theme_danger, 0.58);
   outline-offset: 1px;
 }
@@ -951,6 +1017,87 @@ menubutton.column-header-action > button:checked image {
   padding: 7px;
 }
 
+.item-context-menu {
+  font-size: 0.88em;
+  min-width: 190px;
+  padding: 5px;
+}
+
+.item-context-header {
+  padding: 6px 8px 7px;
+}
+
+.item-context-title {
+  color: @theme_accent;
+  font-weight: 700;
+}
+
+.item-context-summary {
+  color: @theme_dim_text;
+  font-size: 0.82em;
+}
+
+.item-context-menu separator {
+  background: alpha(@theme_border, 0.22);
+  margin: 3px 2px;
+  min-height: 1px;
+}
+
+.item-context-option {
+  background: transparent;
+  border: none;
+  border-radius: 5px;
+  box-shadow: none;
+  color: @theme_text;
+  min-height: 26px;
+  outline: none;
+  padding: 1px 6px;
+}
+
+.item-context-option:hover {
+  background: alpha(@theme_muted, 0.52);
+  color: @theme_text;
+}
+
+.item-context-option:active {
+  background: alpha(@theme_muted, 0.78);
+}
+
+.item-context-option:disabled {
+  background: transparent;
+  color: @theme_dim_text;
+  opacity: 0.46;
+}
+
+.item-context-icon {
+  opacity: 0.72;
+}
+
+.item-context-shortcut {
+  color: @theme_dim_text;
+  font-size: 0.76em;
+  margin-left: 8px;
+}
+
+.item-context-option.danger {
+  color: @theme_danger;
+}
+
+.item-context-option.danger:hover {
+  background: alpha(@theme_danger, 0.14);
+  color: @theme_danger;
+}
+
+.item-context-option.danger:active {
+  background: alpha(@theme_danger, 0.24);
+  color: @theme_danger;
+}
+
+.item-context-option.danger:focus-visible {
+  outline: 1px solid alpha(@theme_danger, 0.64);
+  outline-offset: -1px;
+}
+
 .folder-context-menu separator {
   background: alpha(@theme_border, 0.22);
   margin: 5px 2px;
@@ -975,6 +1122,25 @@ menubutton.column-header-action > button:checked image {
 
 .folder-context-option:active {
   background: alpha(@theme_muted, 0.78);
+}
+
+.folder-context-option.danger {
+  color: @theme_danger;
+}
+
+.folder-context-option.danger:hover {
+  background: alpha(@theme_danger, 0.14);
+  color: @theme_danger;
+}
+
+.folder-context-option.danger:active {
+  background: alpha(@theme_danger, 0.24);
+  color: @theme_danger;
+}
+
+.folder-context-option.danger:focus-visible {
+  outline: 1px solid alpha(@theme_danger, 0.64);
+  outline-offset: -1px;
 }
 
 .folder-context-option:disabled {
@@ -1066,10 +1232,9 @@ menubutton.column-header-action > button:checked image {
 }
 
 .file-list row:selected {
-  background: @theme_highlight;
+  background: alpha(@theme_muted, 0.65);
   color: @theme_text;
-  outline: 1px solid alpha(@theme_accent, 0.7);
-  outline-offset: -1px;
+  outline: none;
 }
 
 .file-marquee {

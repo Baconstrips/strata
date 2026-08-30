@@ -27,6 +27,7 @@ pub mod icons {
     pub const FILE_CODE: &str = "strata-file-code";
     pub const FOLDER: &str = "strata-folder";
     pub const HARD_DRIVE: &str = "strata-hard-drive";
+    pub const INFO: &str = "strata-info";
     pub const FUNNEL: &str = "strata-funnel";
     pub const GRID: &str = "strata-grid";
     pub const HOME: &str = "strata-house";
@@ -41,6 +42,7 @@ pub mod icons {
     pub const PLUS: &str = "strata-plus";
     pub const PICTURES: &str = "strata-image";
     pub const ROWS: &str = "strata-rows";
+    pub const SCISSORS: &str = "strata-scissors";
     pub const SEARCH: &str = "strata-search";
     pub const SETTINGS: &str = "strata-settings";
     pub const SETTINGS_2: &str = "strata-settings-2";
@@ -64,6 +66,8 @@ thread_local! {
     static PRIMARY_ICONS: RefCell<Vec<PrimaryIcon>> = const { RefCell::new(Vec::new()) };
     static TEXT_ICON_COLOR: RefCell<String> = RefCell::new("#c9deed".to_owned());
     static TEXT_ICONS: RefCell<Vec<PrimaryIcon>> = const { RefCell::new(Vec::new()) };
+    static DANGER_ICON_COLOR: RefCell<String> = RefCell::new("#e5484d".to_owned());
+    static DANGER_ICONS: RefCell<Vec<PrimaryIcon>> = const { RefCell::new(Vec::new()) };
 }
 
 pub fn prepare() -> Result<(), Box<dyn std::error::Error>> {
@@ -138,6 +142,20 @@ pub fn set_text_icon(image: &gtk::Image, name: &str) {
 pub fn set_text_icon_color(color: &str) {
     TEXT_ICON_COLOR.with(|current| current.replace(color.to_owned()));
     TEXT_ICONS.with(|icons| recolor_registered_icons(icons, color));
+}
+
+pub fn danger_icon(name: &str, pixel_size: i32) -> gtk::Image {
+    let image = gtk::Image::new();
+    image.set_pixel_size(pixel_size);
+    let color = DANGER_ICON_COLOR.with(|color| color.borrow().clone());
+    apply_primary_icon(&image, name, &color);
+    DANGER_ICONS.with(|icons| register_icon(icons, &image, name));
+    image
+}
+
+pub fn set_danger_icon_color(color: &str) {
+    DANGER_ICON_COLOR.with(|current| current.replace(color.to_owned()));
+    DANGER_ICONS.with(|icons| recolor_registered_icons(icons, color));
 }
 
 fn register_icon(icons: &RefCell<Vec<PrimaryIcon>>, image: &gtk::Image, name: &str) {

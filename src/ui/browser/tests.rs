@@ -19,6 +19,48 @@ fn inline_rename_selects_the_stem_but_keeps_the_extension() {
 }
 
 #[test]
+fn delete_confirmation_labels_distinguish_files_and_folders() {
+    let file = FileEntry {
+        location: Location::local("/fixture/file.txt"),
+        native_name: "file.txt".into(),
+        display_name: "file.txt".into(),
+        kind: crate::model::EntryKind::File,
+        size: crate::model::MetadataValue::Known(10),
+        modified_unix_seconds: crate::model::MetadataValue::Unknown,
+    };
+    let mut folder = file.clone();
+    folder.kind = crate::model::EntryKind::Directory;
+
+    assert_eq!(item_count_label(1), "1 item");
+    assert_eq!(item_count_label(2), "2 items");
+    assert_eq!(entry_kind_summary(&[file.clone()]), "1 file");
+    assert_eq!(entry_kind_summary(&[file.clone(), file.clone()]), "2 files");
+    assert_eq!(entry_kind_summary(&[folder.clone()]), "1 folder");
+    assert_eq!(entry_kind_summary(&[file, folder]), "2 items");
+}
+
+#[test]
+fn multi_selection_summary_lists_at_most_three_names() {
+    let entry = |name: &str| FileEntry {
+        location: Location::local(format!("/fixture/{name}")),
+        native_name: name.into(),
+        display_name: name.into(),
+        kind: crate::model::EntryKind::File,
+        size: crate::model::MetadataValue::Unknown,
+        modified_unix_seconds: crate::model::MetadataValue::Unknown,
+    };
+
+    assert_eq!(
+        selected_items_summary(&[entry("one"), entry("two"), entry("three")]),
+        "one, two, three"
+    );
+    assert_eq!(
+        selected_items_summary(&[entry("one"), entry("two"), entry("three"), entry("four")]),
+        "one, two, three, …"
+    );
+}
+
+#[test]
 fn properties_permissions_are_formatted_symbolically_and_numerically() {
     assert_eq!(format_permissions(0o100774), "-rwxrwxr--  774");
     assert_eq!(format_permissions(0o040755), "drwxr-xr-x  755");

@@ -192,7 +192,7 @@ pub fn present_location(application: &gtk::Application, location: Option<PathBuf
     window.add_controller(settings_shortcut);
     window.set_child(Some(&window_overlay));
     install_modal_focus_trap(&window);
-    install_keyboard_navigation(&window, &browser, &sidebar_toggle, &preview, &blurred_root);
+    install_keyboard_navigation(&window, &browser, &sidebar_toggle, &preview);
     browser.navigate(location.unwrap_or_else(home_directory));
 
     let browser_controller = browser.browser();
@@ -264,7 +264,6 @@ fn install_keyboard_navigation(
     view: &BrowserView,
     sidebar_toggle: &gtk::ToggleButton,
     preview: &PreviewDrawer,
-    root: &BlurBin,
 ) {
     let keys = gtk::EventControllerKey::new();
     keys.set_propagation_phase(gtk::PropagationPhase::Capture);
@@ -272,7 +271,6 @@ fn install_keyboard_navigation(
     let sidebar_toggle = sidebar_toggle.clone();
     let preview = preview.clone();
     let dialog_parent = window.clone();
-    let root = root.clone();
     let weak_browser = Rc::downgrade(&view.browser());
     keys.connect_key_pressed(move |_, key, _, modifiers| {
         let Some(browser) = weak_browser.upgrade() else {
@@ -342,12 +340,8 @@ fn install_keyboard_navigation(
             browser.toggle_hidden();
             return glib::Propagation::Stop;
         }
-        if key == gtk::gdk::Key::Delete && !view.filter_has_focus() {
-            let entries = browser.selected_entries();
-            if !entries.is_empty() {
-                show_delete_confirmation(&dialog_parent, &root, &browser, entries, shift);
-                return glib::Propagation::Stop;
-            }
+        if key == gtk::gdk::Key::Delete && !view.filter_has_focus() && view.confirm_delete(shift) {
+            return glib::Propagation::Stop;
         }
         if key == gtk::gdk::Key::space && !alt && !control {
             preview.toggle(browser.focused_entry());
@@ -414,113 +408,6 @@ fn install_modal_focus_trap(window: &gtk::ApplicationWindow) {
             layer.grab_focus();
         }
     });
-}
-
-fn show_delete_confirmation(
-    parent: &gtk::ApplicationWindow,
-    root: &BlurBin,
-    browser: &Rc<Browser>,
-    entries: Vec<crate::model::FileEntry>,
-    permanent: bool,
-) {
-    let Some(window_overlay) = parent.child().and_downcast::<gtk::Overlay>() else {
-        return;
-    };
-    root.set_blurred(true);
-
-    let content = gtk::Box::new(gtk::Orientation::Vertical, 18);
-    content.add_css_class("delete-confirmation");
-    content.add_css_class("delete-confirmation-content");
-    content.set_halign(gtk::Align::Center);
-    content.set_valign(gtk::Align::Center);
-    let question = gtk::Label::new(Some("Are you sure you want to delete these files?"));
-    question.add_css_class("delete-confirmation-title");
-    question.set_xalign(0.0);
-    question.set_wrap(true);
-    content.append(&question);
-
-    let files = gtk::Box::new(gtk::Orientation::Vertical, 6);
-    files.add_css_class("delete-confirmation-files");
-    for entry in &entries {
-        let item = gtk::Label::new(Some(&format!("• {}", entry.display_name)));
-        item.add_css_class("delete-confirmation-file");
-        item.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
-        item.set_xalign(0.0);
-        item.set_tooltip_text(Some(&entry.location.display_path()));
-        files.append(&item);
-    }
-    let file_scroller = gtk::ScrolledWindow::builder()
-        .child(&files)
-        .hscrollbar_policy(gtk::PolicyType::Never)
-        .max_content_height(220)
-        .propagate_natural_height(true)
-        .build();
-    file_scroller.add_css_class("delete-confirmation-list");
-    content.append(&file_scroller);
-
-    let actions = gtk::Box::new(gtk::Orientation::Horizontal, 10);
-    actions.add_css_class("delete-confirmation-actions");
-    actions.set_halign(gtk::Align::End);
-    let cancel = gtk::Button::with_label("Cancel");
-    cancel.add_css_class("delete-confirmation-cancel");
-    let confirm = gtk::Button::with_label(if permanent {
-        "Permanently delete"
-    } else {
-        "Delete"
-    });
-    confirm.add_css_class("delete-confirmation-delete");
-    actions.append(&cancel);
-    actions.append(&confirm);
-    content.append(&actions);
-
-    let layer = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    layer.add_css_class("app-modal-layer");
-    layer.add_css_class("modal-backdrop");
-    layer.set_halign(gtk::Align::Fill);
-    layer.set_valign(gtk::Align::Fill);
-    layer.set_hexpand(true);
-    layer.set_vexpand(true);
-    layer.set_focusable(true);
-    let top = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    top.set_vexpand(true);
-    let bottom = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    bottom.set_vexpand(true);
-    layer.append(&top);
-    layer.append(&content);
-    layer.append(&bottom);
-    window_overlay.add_overlay(&layer);
-
-    let closed_layer = layer.clone();
-    let closed_overlay = window_overlay.clone();
-    let unblurred_root = root.clone();
-    cancel.connect_clicked(move |_| {
-        closed_overlay.remove_overlay(&closed_layer);
-        unblurred_root.set_blurred(false);
-    });
-    let confirmed_layer = layer.clone();
-    let confirmed_overlay = window_overlay.clone();
-    let confirmed_root = root.clone();
-    let confirmed_browser = browser.clone();
-    confirm.connect_clicked(move |_| {
-        confirmed_browser.delete(entries.clone(), permanent);
-        confirmed_overlay.remove_overlay(&confirmed_layer);
-        confirmed_root.set_blurred(false);
-    });
-    let escape = gtk::EventControllerKey::new();
-    let escaped_layer = layer.clone();
-    let escaped_overlay = window_overlay;
-    let escaped_root = root.clone();
-    escape.connect_key_pressed(move |_, key, _, _| {
-        if key == gtk::gdk::Key::Escape {
-            escaped_overlay.remove_overlay(&escaped_layer);
-            escaped_root.set_blurred(false);
-            glib::Propagation::Stop
-        } else {
-            glib::Propagation::Proceed
-        }
-    });
-    layer.add_controller(escape);
-    cancel.grab_focus();
 }
 
 fn build_appearance_menu(controller: &Rc<Browser>) -> gtk::MenuButton {
