@@ -88,6 +88,7 @@ struct Pane {
     view: gtk::Widget,
     bound_items: Rc<RefCell<Vec<BoundModeItem>>>,
     filter_entry: Option<gtk::Entry>,
+    filter_button: Option<gtk::ToggleButton>,
     new_folder_placeholder: Option<gtk::StringList>,
 }
 
@@ -342,10 +343,51 @@ impl ModeViews {
     }
 
     pub fn filter_has_focus(&self) -> bool {
+        let focused = self.stack.root().and_then(|root| root.focus());
         self.grid_panes
             .iter()
+            .chain(self.explorer_pane.iter())
             .filter_map(|pane| pane.filter_entry.as_ref())
-            .any(gtk::prelude::WidgetExt::has_focus)
+            .any(|entry| widget_has_focus(entry, focused.as_ref()))
+    }
+
+    pub fn show_filter(&self) -> bool {
+        let pane = match self.mode {
+            BrowserMode::Columns => None,
+            BrowserMode::Grid => self.grid_panes.first(),
+            BrowserMode::Explorer => self.explorer_pane.as_ref(),
+        };
+        let Some(pane) = pane else {
+            return false;
+        };
+        let (Some(entry), Some(button)) = (pane.filter_entry.as_ref(), pane.filter_button.as_ref())
+        else {
+            return false;
+        };
+        button.set_active(true);
+        entry.grab_focus();
+        true
+    }
+
+    pub fn dismiss_focused_filter(&self) -> bool {
+        let focused = self.stack.root().and_then(|root| root.focus());
+        let Some(pane) = self
+            .grid_panes
+            .iter()
+            .chain(self.explorer_pane.iter())
+            .find(|pane| {
+                pane.filter_entry
+                    .as_ref()
+                    .is_some_and(|entry| widget_has_focus(entry, focused.as_ref()))
+            })
+        else {
+            return false;
+        };
+        if let Some(button) = pane.filter_button.as_ref() {
+            button.set_active(false);
+        }
+        pane.view.grab_focus();
+        true
     }
 
     pub fn set_mode(&mut self, mode: BrowserMode) {
@@ -696,6 +738,13 @@ impl ModeViews {
     }
 }
 
+fn widget_has_focus(widget: &impl IsA<gtk::Widget>, focused: Option<&gtk::Widget>) -> bool {
+    widget.has_focus()
+        || focused.is_some_and(|focused| {
+            focused == widget.as_ref() || focused.is_ancestor(widget.as_ref())
+        })
+}
+
 #[derive(Clone)]
 struct GridOptions {
     peek_state: Option<Weak<super::browser::ViewState>>,
@@ -742,8 +791,46 @@ struct GridControls {
     actions: gtk::Box,
     filter_entry: gtk::Entry,
     filter_revealer: gtk::Revealer,
+    filter_button: gtk::ToggleButton,
     thumbnail_scale: gtk::Scale,
     thumbnail_value: gtk::Label,
+}
+
+fn filter_controls(tooltip: &str) -> (gtk::Entry, gtk::Revealer, gtk::ToggleButton) {
+    let entry = gtk::Entry::builder()
+        .placeholder_text("Filter items…")
+        .has_frame(false)
+        .hexpand(true)
+        .build();
+    entry.add_css_class("column-filter-entry");
+    let row = gtk::Box::new(gtk::Orientation::Horizontal, 7);
+    row.add_css_class("column-filter");
+    row.append(&crate::assets::primary_icon(
+        crate::assets::icons::FUNNEL,
+        16,
+    ));
+    row.append(&entry);
+    let revealer = gtk::Revealer::builder()
+        .transition_type(gtk::RevealerTransitionType::SlideDown)
+        .child(&row)
+        .build();
+    let button = gtk::ToggleButton::builder().tooltip_text(tooltip).build();
+    button.set_child(Some(&crate::assets::text_icon(
+        crate::assets::icons::FUNNEL,
+        16,
+    )));
+    button.add_css_class("column-header-action");
+    let shown_filter = revealer.clone();
+    let focused_filter = entry.clone();
+    button.connect_toggled(move |button| {
+        shown_filter.set_reveal_child(button.is_active());
+        if button.is_active() {
+            focused_filter.grab_focus();
+        } else {
+            focused_filter.set_text("");
+        }
+    });
+    (entry, revealer, button)
 }
 
 fn grid_controls(browser: &Rc<Browser>, depth: usize, thumbnail_size: i32) -> GridControls {
@@ -803,47 +890,14 @@ fn grid_controls(browser: &Rc<Browser>, depth: usize, thumbnail_size: i32) -> Gr
     ));
     actions.append(&super::browser::column_sort_menu(browser, depth));
 
-    let filter_entry = gtk::Entry::builder()
-        .placeholder_text("Filter items…")
-        .has_frame(false)
-        .hexpand(true)
-        .build();
-    filter_entry.add_css_class("column-filter-entry");
-    let filter_row = gtk::Box::new(gtk::Orientation::Horizontal, 7);
-    filter_row.add_css_class("column-filter");
-    filter_row.append(&crate::assets::primary_icon(
-        crate::assets::icons::FUNNEL,
-        16,
-    ));
-    filter_row.append(&filter_entry);
-    let filter_revealer = gtk::Revealer::builder()
-        .transition_type(gtk::RevealerTransitionType::SlideDown)
-        .child(&filter_row)
-        .build();
-    let filter_button = gtk::ToggleButton::builder()
-        .tooltip_text("Filter grid")
-        .build();
-    filter_button.set_child(Some(&crate::assets::text_icon(
-        crate::assets::icons::FUNNEL,
-        16,
-    )));
-    filter_button.add_css_class("column-header-action");
-    let revealer = filter_revealer.clone();
-    let entry = filter_entry.clone();
-    filter_button.connect_toggled(move |button| {
-        revealer.set_reveal_child(button.is_active());
-        if button.is_active() {
-            entry.grab_focus();
-        } else {
-            entry.set_text("");
-        }
-    });
+    let (filter_entry, filter_revealer, filter_button) = filter_controls("Filter grid (Ctrl+F)");
     actions.append(&filter_button);
     GridControls {
         leading,
         actions,
         filter_entry,
         filter_revealer,
+        filter_button,
         thumbnail_scale,
         thumbnail_value,
     }
@@ -1136,6 +1190,7 @@ fn build_grid_pane(
         view: view.upcast(),
         bound_items,
         filter_entry: Some(controls.filter_entry),
+        filter_button: Some(controls.filter_button),
         new_folder_placeholder: Some(new_folder_placeholder),
     }
 }
@@ -1405,15 +1460,39 @@ fn build_explorer_pane(
     title: &str,
 ) -> Pane {
     let navigation = explorer_navigation(&browser);
-    let (shell, content, model, stack, status, spinner) =
-        pane_base(title, "explorer-pane", Some(navigation.upcast()), None);
+    let actions = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    actions.add_css_class("grid-header-actions");
+    let (filter_entry, filter_revealer, filter_button) =
+        filter_controls("Filter explorer (Ctrl+F)");
+    actions.append(&filter_button);
+    let (shell, content, model, stack, status, spinner) = pane_base(
+        title,
+        "explorer-pane",
+        Some(navigation.upcast()),
+        Some(actions.upcast()),
+    );
     if let Some(destination) = browser.location_at(depth) {
         install_mode_directory_drop_target(&stack, destination, transfer_handler.clone());
     }
+    content.append(&filter_revealer);
+    let filter_query = Rc::new(RefCell::new(String::new()));
+    let query = filter_query.clone();
+    let filter = gtk::CustomFilter::new(move |item| {
+        let Some(item) = item.downcast_ref::<gtk::StringObject>() else {
+            return false;
+        };
+        let query = query.borrow();
+        query.is_empty() || item.string().to_lowercase().contains(query.as_str())
+    });
+    let filtered_model = gtk::FilterListModel::new(Some(model.clone()), Some(filter.clone()));
+    filter_entry.connect_changed(move |entry| {
+        *filter_query.borrow_mut() = entry.text().to_lowercase();
+        filter.changed(gtk::FilterChange::Different);
+    });
     let new_folder_placeholder = gtk::StringList::new(&[]);
     let flattened_models = gio::ListStore::new::<gio::ListModel>();
     flattened_models.append(&new_folder_placeholder.clone().upcast::<gio::ListModel>());
-    flattened_models.append(&model.clone().upcast::<gio::ListModel>());
+    flattened_models.append(&filtered_model.upcast::<gio::ListModel>());
     let view_model = gtk::FlattenListModel::new(Some(flattened_models));
     let view_model_object = view_model.clone().upcast::<gio::ListModel>();
     let selection = gtk::MultiSelection::new(Some(view_model.clone()));
@@ -1638,7 +1717,8 @@ fn build_explorer_pane(
         spinner,
         view: view.upcast(),
         bound_items,
-        filter_entry: None,
+        filter_entry: Some(filter_entry),
+        filter_button: Some(filter_button),
         new_folder_placeholder: Some(new_folder_placeholder),
     }
 }

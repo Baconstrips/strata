@@ -602,17 +602,39 @@ impl BrowserView {
         true
     }
 
+    pub fn show_filter(&self) -> bool {
+        if self.view_mode() != BrowserMode::Columns {
+            return self.state.mode_views.borrow().show_filter();
+        }
+        let depth = self
+            .state
+            .focused_column_depth()
+            .or_else(|| self.state.browser.active_depth());
+        let columns = self.state.columns.borrow();
+        let Some(column) = depth.and_then(|depth| columns.get(depth)) else {
+            return false;
+        };
+        column.filter_button.set_active(true);
+        column.filter_entry.grab_focus();
+        true
+    }
+
     pub fn filter_has_focus(&self) -> bool {
+        let focused = self.state.overlay.root().and_then(|root| root.focus());
         self.state.mode_views.borrow().filter_has_focus()
-            || self
-                .state
-                .columns
-                .borrow()
-                .iter()
-                .any(|column| column.filter_entry.has_focus())
+            || self.state.columns.borrow().iter().any(|column| {
+                column.filter_entry.has_focus()
+                    || focused.as_ref().is_some_and(|focused| {
+                        focused == column.filter_entry.upcast_ref::<gtk::Widget>()
+                            || focused.is_ancestor(&column.filter_entry)
+                    })
+            })
     }
 
     pub fn dismiss_focused_filter(&self) -> bool {
+        if self.state.mode_views.borrow().dismiss_focused_filter() {
+            return true;
+        }
         let focused = self.state.overlay.root().and_then(|root| root.focus());
         let columns = self.state.columns.borrow();
         let Some(column) = columns.iter().find(|column| {
@@ -2540,7 +2562,7 @@ impl ViewState {
             .child(&filter_control)
             .build();
         let filter_button = gtk::ToggleButton::builder()
-            .tooltip_text("Filter this pane")
+            .tooltip_text("Filter this pane (Ctrl+F)")
             .build();
         filter_button.set_child(Some(&crate::assets::text_icon(
             crate::assets::icons::FUNNEL,

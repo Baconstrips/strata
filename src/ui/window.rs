@@ -395,6 +395,14 @@ fn install_keyboard_navigation(
         if key == gtk::gdk::Key::Escape && view.dismiss_focused_filter() {
             return glib::Propagation::Stop;
         }
+        if control
+            && !shift
+            && !alt
+            && matches!(key, gtk::gdk::Key::f | gtk::gdk::Key::F)
+            && view.show_filter()
+        {
+            return glib::Propagation::Stop;
+        }
         if control && key == gtk::gdk::Key::l {
             view.begin_location_edit();
             return glib::Propagation::Stop;

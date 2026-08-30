@@ -191,6 +191,7 @@ fn keybindings_page() -> gtk::Widget {
         ("Open folder", "L / → / Enter"),
         ("Go to parent", "H / ←"),
         ("Edit location", "Ctrl + L"),
+        ("Filter items", "Ctrl + F"),
         ("Toggle sidebar", "Ctrl + B"),
     ] {
         append_keybinding(&content, label, keys);
