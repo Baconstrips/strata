@@ -84,23 +84,20 @@ pub fn present_location(application: &gtk::Application, location: Option<PathBuf
     header.pack_start(&sidebar_toggle);
     header.pack_start(&browser.location_widget());
     let search_button = gtk::Button::builder().tooltip_text("Search").build();
-    search_button.set_child(Some(&crate::assets::primary_icon(
+    search_button.set_child(Some(&crate::assets::text_icon(
         crate::assets::icons::SEARCH,
         20,
     )));
     search_button.add_css_class("header-action");
     let appearance = build_appearance_menu(&controller);
     let settings = gtk::Button::builder().tooltip_text("Settings").build();
-    settings.set_child(Some(&crate::assets::primary_icon(
+    settings.set_child(Some(&crate::assets::text_icon(
         crate::assets::icons::SETTINGS,
         20,
     )));
     settings.add_css_class("header-action");
     let close_window = gtk::Button::builder().tooltip_text("Close window").build();
-    close_window.set_child(Some(&crate::assets::primary_icon(
-        crate::assets::icons::X,
-        20,
-    )));
+    close_window.set_child(Some(&crate::assets::text_icon(crate::assets::icons::X, 20)));
     close_window.add_css_class("header-action");
     let closing_window = window.clone();
     close_window.connect_clicked(move |_| closing_window.close());
@@ -578,11 +575,11 @@ fn build_appearance_menu(controller: &Rc<Browser>) -> gtk::MenuButton {
         .tooltip_text("Appearance")
         .popover(&popover)
         .build();
-    let icon = crate::assets::primary_icon(crate::assets::icons::LIST, 20);
+    let icon = crate::assets::text_icon(crate::assets::icons::LIST, 20);
     button.set_child(Some(&icon));
     button.add_css_class("header-action");
     button.connect_active_notify(move |button| {
-        crate::assets::set_primary_icon(
+        crate::assets::set_text_icon(
             &icon,
             if button.is_active() {
                 crate::assets::icons::LIST_ACTIVE

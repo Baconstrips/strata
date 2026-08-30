@@ -62,6 +62,8 @@ struct PrimaryIcon {
 thread_local! {
     static PRIMARY_ICON_COLOR: RefCell<String> = RefCell::new("#8bc9eb".to_owned());
     static PRIMARY_ICONS: RefCell<Vec<PrimaryIcon>> = const { RefCell::new(Vec::new()) };
+    static TEXT_ICON_COLOR: RefCell<String> = RefCell::new("#c9deed".to_owned());
+    static TEXT_ICONS: RefCell<Vec<PrimaryIcon>> = const { RefCell::new(Vec::new()) };
 }
 
 pub fn prepare() -> Result<(), Box<dyn std::error::Error>> {
@@ -117,14 +119,52 @@ pub fn set_primary_icon(image: &gtk::Image, name: &str) {
 
 pub fn set_primary_icon_color(color: &str) {
     PRIMARY_ICON_COLOR.with(|current| current.replace(color.to_owned()));
-    PRIMARY_ICONS.with(|icons| {
-        icons.borrow_mut().retain(|icon| {
-            let Some(image) = icon.image.upgrade() else {
-                return false;
-            };
-            apply_primary_icon(&image, &icon.name, color);
-            true
-        });
+    PRIMARY_ICONS.with(|icons| recolor_registered_icons(icons, color));
+}
+
+pub fn text_icon(name: &str, pixel_size: i32) -> gtk::Image {
+    let image = gtk::Image::new();
+    image.set_pixel_size(pixel_size);
+    set_text_icon(&image, name);
+    image
+}
+
+pub fn set_text_icon(image: &gtk::Image, name: &str) {
+    let color = TEXT_ICON_COLOR.with(|color| color.borrow().clone());
+    apply_primary_icon(image, name, &color);
+    TEXT_ICONS.with(|icons| register_icon(icons, image, name));
+}
+
+pub fn set_text_icon_color(color: &str) {
+    TEXT_ICON_COLOR.with(|current| current.replace(color.to_owned()));
+    TEXT_ICONS.with(|icons| recolor_registered_icons(icons, color));
+}
+
+fn register_icon(icons: &RefCell<Vec<PrimaryIcon>>, image: &gtk::Image, name: &str) {
+    let mut icons = icons.borrow_mut();
+    icons.retain(|icon| icon.image.upgrade().is_some());
+    if let Some(icon) = icons
+        .iter_mut()
+        .find(|icon| icon.image.upgrade().as_ref() == Some(image))
+    {
+        icon.name = name.to_owned();
+        return;
+    }
+    let image_ref = glib::WeakRef::new();
+    image_ref.set(Some(image));
+    icons.push(PrimaryIcon {
+        image: image_ref,
+        name: name.to_owned(),
+    });
+}
+
+fn recolor_registered_icons(icons: &RefCell<Vec<PrimaryIcon>>, color: &str) {
+    icons.borrow_mut().retain(|icon| {
+        let Some(image) = icon.image.upgrade() else {
+            return false;
+        };
+        apply_primary_icon(&image, &icon.name, color);
+        true
     });
 }
 

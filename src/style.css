@@ -59,14 +59,34 @@ headerbar image {
 
 headerbar button.header-action,
 headerbar menubutton.header-action > button {
-  color: @theme_border;
+  color: @theme_text;
+}
+
+headerbar button.header-action image,
+headerbar menubutton.header-action > button image {
+  opacity: 0.42;
 }
 
 headerbar button.header-action:hover,
+headerbar button.header-action:active,
 headerbar button.header-action.active,
+headerbar button.header-action:focus-visible,
 headerbar menubutton.header-action > button:hover,
-headerbar menubutton.header-action > button:checked {
-  color: @theme_accent;
+headerbar menubutton.header-action > button:active,
+headerbar menubutton.header-action > button:checked,
+headerbar menubutton.header-action > button:focus-visible {
+  color: @theme_text;
+}
+
+headerbar button.header-action:hover image,
+headerbar button.header-action:active image,
+headerbar button.header-action.active image,
+headerbar button.header-action:focus-visible image,
+headerbar menubutton.header-action > button:hover image,
+headerbar menubutton.header-action > button:active image,
+headerbar menubutton.header-action > button:checked image,
+headerbar menubutton.header-action > button:focus-visible image {
+  opacity: 1;
 }
 
 .appearance-popover contents {
