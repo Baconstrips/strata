@@ -3173,7 +3173,14 @@ impl ViewState {
 
         let presentation = LoadPresentation::new(&scroll, Some(retry));
         install_directory_drop_target(self, &presentation.stack, location.clone());
-        install_folder_context_menu(self, &presentation.stack, &list, depth, location.clone());
+        install_folder_context_menu(
+            self,
+            presentation.stack.upcast_ref(),
+            &selection,
+            Rc::new(|picked| is_file_row_target(picked.clone())),
+            depth,
+            location.clone(),
+        );
         let rows_for_context = bound_rows.clone();
         let pick_position = Rc::new(move |picked: &gtk::Widget| {
             let picked = file_row_target(picked.clone())?;
@@ -3644,10 +3651,11 @@ fn filtered_position_for_source(column: &ColumnView, source_position: usize) -> 
     })
 }
 
-fn install_folder_context_menu(
+pub(super) fn install_folder_context_menu(
     state: &Rc<ViewState>,
-    parent: &gtk::Stack,
-    list: &gtk::ListView,
+    parent: &gtk::Widget,
+    selection: &gtk::MultiSelection,
+    is_item_target: Rc<dyn Fn(&gtk::Widget) -> bool>,
     depth: usize,
     location: Location,
 ) {
@@ -3659,7 +3667,6 @@ fn install_folder_context_menu(
         .has_arrow(false)
         .build();
     popover.add_css_class("folder-context-popover");
-    popover.set_parent(parent);
 
     let new_folder = context_menu_option("New Folder", Some("Ctrl+Shift+N"));
     let paste = context_menu_option("Paste", Some("Ctrl+V"));
@@ -3682,7 +3689,8 @@ fn install_folder_context_menu(
     });
     let weak = Rc::downgrade(state);
     let folder = location.clone();
-    popover.connect_closed(move |_| {
+    popover.connect_closed(move |popover| {
+        popover.unparent();
         if !pending_new_folder.replace(false) {
             return;
         }
@@ -3728,19 +3736,16 @@ fn install_folder_context_menu(
 
     let menu_click = gtk::GestureClick::new();
     menu_click.set_button(3);
-    let list = list.clone();
-    let weak_popover = popover.downgrade();
+    let selection = selection.clone();
+    let popover_for_click = popover.clone();
     menu_click.connect_pressed(move |gesture, _, x, y| {
-        let over_row = gesture
+        let over_item = gesture
             .widget()
             .and_then(|widget| widget.pick(x, y, gtk::PickFlags::DEFAULT))
-            .is_some_and(is_file_row_target);
-        if over_row {
+            .is_some_and(|picked| is_item_target(&picked));
+        if over_item {
             return;
         }
-        let Some(popover) = weak_popover.upgrade() else {
-            return;
-        };
         gesture.set_state(gtk::EventSequenceState::Claimed);
         paste.set_sensitive(gtk::gdk::Display::default().is_some_and(|display| {
             display
@@ -3748,14 +3753,19 @@ fn install_folder_context_menu(
                 .formats()
                 .contains_type(gtk::gdk::FileList::static_type())
         }));
-        select_all.set_sensitive(list.model().is_some_and(|model| model.n_items() > 0));
-        popover.set_pointing_to(Some(&gtk::gdk::Rectangle::new(
+        select_all.set_sensitive(selection.n_items() > 0);
+        if popover_for_click.parent().is_none()
+            && let Some(parent) = gesture.widget()
+        {
+            popover_for_click.set_parent(&parent);
+        }
+        popover_for_click.set_pointing_to(Some(&gtk::gdk::Rectangle::new(
             x.round() as i32,
             y.round() as i32,
             1,
             1,
         )));
-        popover.popup();
+        popover_for_click.popup();
     });
     parent.add_controller(menu_click);
 }

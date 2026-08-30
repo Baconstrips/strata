@@ -263,9 +263,7 @@ headerbar menubutton.header-action > button:focus-visible image {
   border-radius: 9px;
   box-shadow: 0 12px 38px alpha(@theme_bg, 0.82), 0 0 14px alpha(@theme_accent, 0.24);
   min-height: 452px;
-  max-height: 452px;
   min-width: 760px;
-  overflow: hidden;
 }
 
 .search-bar {
@@ -298,7 +296,6 @@ headerbar menubutton.header-action > button:focus-visible image {
 .search-results-scroll {
   background: @theme_surface;
   min-height: 360px;
-  max-height: 360px;
 }
 
 .search-results,

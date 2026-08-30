@@ -612,6 +612,17 @@ impl ModeViews {
         let filtered = pane.filtered_model.clone();
         let source_position =
             Rc::new(move |position| source_position_for_view(&source, filtered.as_ref(), position));
+        if let Some(location) = self.browser.location_at(pane.depth) {
+            let item_position = pick_position.clone();
+            super::browser::install_folder_context_menu(
+                &state,
+                pane.stack.upcast_ref(),
+                &pane.selection,
+                Rc::new(move |picked| item_position(picked).is_some()),
+                pane.depth,
+                location,
+            );
+        }
         super::browser::install_item_context_menu(
             &state,
             &pane.view,

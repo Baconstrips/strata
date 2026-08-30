@@ -51,6 +51,7 @@ impl SearchDialog {
         panel.set_valign(gtk::Align::Center);
         panel.set_size_request(760, 452);
         panel.set_vexpand(false);
+        panel.set_overflow(gtk::Overflow::Hidden);
 
         let search_bar = gtk::Box::new(gtk::Orientation::Horizontal, 10);
         search_bar.add_css_class("search-bar");
