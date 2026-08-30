@@ -831,14 +831,21 @@ menubutton.column-header-action > button:focus-visible image {
 }
 
 .column-filter-entry,
-.column-filter-entry:focus {
+.column-filter-entry:focus,
+.column-filter-entry:focus-visible {
   background: transparent;
   border: none;
   border-radius: 0;
   box-shadow: none;
   color: @theme_text;
   min-height: 28px;
+  outline: none;
   padding: 0;
+}
+
+.column-filter:focus-within {
+  border-bottom-color: @theme_accent;
+  box-shadow: inset 0 -1px alpha(@theme_accent, 0.42);
 }
 
 .column-popover contents {
@@ -1519,7 +1526,9 @@ menubutton.column-header-action > button:focus-visible image {
   outline-offset: -2px;
 }
 
-.file-marquee {
+.file-marquee,
+.file-grid rubberband,
+.explorer-list rubberband {
   background: alpha(@theme_highlight, 0.58);
   border: 1px solid @theme_accent;
   border-radius: 4px;
@@ -1746,4 +1755,261 @@ menubutton.column-header-action > button:focus-visible image {
 .keybinding-keys {
   color: @theme_accent;
   font-size: 0.9em;
+}
+
+
+/* Alternate browser presentations */
+.mode-grid-columns,
+.mode-grid-columns viewport,
+.mode-grid-columns gridview,
+.mode-explorer,
+.mode-explorer viewport,
+.mode-explorer listview {
+  background: @theme_bg;
+  color: @theme_text;
+}
+
+.grid-pane {
+  background: @theme_bg;
+  min-width: 220px;
+}
+
+.mode-pane-header {
+  background: @theme_bg;
+  border-bottom: 1px solid alpha(@theme_border, 0.6);
+  color: @theme_accent;
+  font-weight: 700;
+  min-height: 36px;
+  padding: 4px 12px;
+}
+
+.file-grid {
+  padding: 3px;
+}
+
+.file-grid > child {
+  border-radius: 5px;
+  margin: 1px;
+  outline: none;
+}
+
+.file-grid > child:hover {
+  background: transparent;
+}
+
+.file-grid > child:hover .grid-card {
+  background: alpha(@theme_muted, 0.62);
+}
+
+.file-grid > child:selected {
+  background: transparent;
+  color: @theme_accent;
+  outline: none;
+}
+
+.file-grid > child:selected .grid-card {
+  background: @theme_highlight;
+  outline: 1px solid alpha(@theme_accent, 0.9);
+  outline-offset: -1px;
+}
+
+.file-grid > child:focus-visible .grid-card {
+  outline: 2px solid @theme_accent;
+  outline-offset: -2px;
+}
+
+.grid-card {
+  border-radius: 5px;
+  min-height: 0;
+  min-width: 0;
+  padding: 2px 4px;
+}
+
+.grid-card-icon {
+  color: @theme_accent;
+}
+
+.grid-card-label {
+  color: @theme_text;
+}
+
+.grid-card.drop-destination {
+  background: alpha(@theme_highlight, 0.82);
+  color: @theme_accent;
+  outline: 1px solid @theme_accent;
+  outline-offset: -1px;
+}
+
+.grid-card.dragging {
+  opacity: 0.52;
+}
+
+.grid-card.cut,
+.explorer-row.cut {
+  opacity: 0.46;
+}
+
+.file-grid > child:selected .grid-card-label {
+  color: @theme_accent;
+}
+
+.mode-grid-columns.density-airy .file-grid {
+  padding: 8px;
+}
+
+.mode-grid-columns.density-airy .file-grid > child {
+  margin: 3px;
+}
+
+.mode-grid-columns.density-airy .grid-card {
+  min-height: 130px;
+  min-width: 225px;
+  padding: 8px 10px;
+}
+
+.explorer-pane {
+  background: @theme_bg;
+  color: @theme_text;
+}
+
+.explorer-headings {
+  background: @theme_surface;
+  border-bottom: 1px solid alpha(@theme_border, 0.6);
+  color: @theme_dim_text;
+  font-size: 0.82em;
+  font-weight: 700;
+  min-height: 28px;
+  padding: 0;
+}
+
+.explorer-heading-cell {
+  border-right: 1px solid alpha(@theme_border, 0.26);
+}
+
+.explorer-heading-button {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  color: @theme_dim_text;
+  min-height: 28px;
+  padding: 0 12px;
+}
+
+.explorer-heading-button:hover {
+  background: alpha(@theme_muted, 0.5);
+  color: @theme_text;
+}
+
+.explorer-heading-button:active {
+  background: alpha(@theme_muted, 0.72);
+  color: @theme_accent;
+}
+
+.explorer-heading-button:focus-visible {
+  outline: 2px solid @theme_accent;
+  outline-offset: -2px;
+}
+
+.explorer-column-resize-handle {
+  background: transparent;
+  min-width: 7px;
+}
+
+.explorer-column-resize-handle:hover,
+.explorer-column-resize-handle:active {
+  background: alpha(@theme_accent, 0.5);
+}
+
+.explorer-navigation {
+  margin-left: 4px;
+}
+
+.explorer-navigation-button {
+  background: transparent;
+  border: none;
+  border-radius: 5px;
+  box-shadow: none;
+  color: @theme_text;
+  min-height: 26px;
+  min-width: 26px;
+  padding: 3px;
+}
+
+.explorer-navigation-button image {
+  opacity: 0.55;
+}
+
+.explorer-navigation-button:hover {
+  background: alpha(@theme_muted, 0.56);
+  color: @theme_text;
+}
+
+.explorer-navigation-button:hover image,
+.explorer-navigation-button:active image,
+.explorer-navigation-button:focus-visible image {
+  opacity: 1;
+}
+
+.explorer-navigation-button:active {
+  background: alpha(@theme_muted, 0.78);
+  color: @theme_accent;
+}
+
+.explorer-navigation-button:focus-visible {
+  outline: 2px solid @theme_accent;
+  outline-offset: -2px;
+}
+
+.explorer-list row {
+  background: transparent;
+  color: @theme_text;
+  outline: none;
+}
+
+.explorer-list row:hover {
+  background: alpha(@theme_muted, 0.62);
+}
+
+.explorer-list row:selected {
+  background: @theme_highlight;
+  color: @theme_accent;
+}
+
+.explorer-row.drop-destination {
+  background: alpha(@theme_highlight, 0.82);
+  color: @theme_accent;
+  outline: 1px solid @theme_accent;
+  outline-offset: -1px;
+}
+
+.explorer-row.dragging {
+  opacity: 0.52;
+}
+
+.explorer-list row:focus-visible {
+  outline: 2px solid @theme_accent;
+  outline-offset: -2px;
+}
+
+.explorer-row {
+  min-height: 28px;
+  padding: 0;
+}
+
+.explorer-name-cell,
+.explorer-metadata-cell {
+  padding-left: 12px;
+}
+
+.mode-explorer.density-airy .explorer-row {
+  min-height: 42px;
+  padding-bottom: 4px;
+  padding-top: 4px;
+}
+
+.density-airy .file-row {
+  min-height: 38px;
+  padding-bottom: 5px;
+  padding-top: 5px;
 }

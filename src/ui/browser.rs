@@ -14,11 +14,14 @@ use gtk::{gio, glib, prelude::*};
 use crate::{
     app::{Browser, BrowserEvent},
     model::{EntryKind, FileEntry, Location, SortDirection, SortKey},
-    services::{FileSource, OperationProvider, PreviewContent, content_family},
+    services::{
+        FileSource, OperationProvider, PreviewContent, content_family, has_plain_text_extension,
+    },
 };
 
 use super::{
     blur::BlurBin,
+    browser_modes::{BrowserDensity, BrowserMode, ModeViews},
     motion::{animations_enabled, emphasized_deceleration},
 };
 
@@ -187,7 +190,7 @@ impl Default for PeekBehavior {
     }
 }
 
-struct ViewState {
+pub(super) struct ViewState {
     overlay: gtk::Overlay,
     location_stack: gtk::Stack,
     breadcrumbs: gtk::Box,
@@ -195,6 +198,7 @@ struct ViewState {
     location_error: gtk::Label,
     columns_widget: gtk::Box,
     scroller: gtk::ScrolledWindow,
+    mode_views: RefCell<ModeViews>,
     columns: RefCell<Vec<ColumnView>>,
     hovered_column: Cell<Option<usize>>,
     cut_locations: RefCell<Vec<Location>>,
@@ -232,7 +236,6 @@ impl BrowserView {
             .vexpand(true)
             .build();
         let overlay = gtk::Overlay::new();
-        overlay.set_child(Some(&scroller));
 
         let location_entry = gtk::Entry::builder()
             .hexpand(true)
@@ -291,6 +294,8 @@ impl BrowserView {
         location_stack.set_valign(gtk::Align::Center);
 
         let browser = Browser::new(source);
+        let mode_views = ModeViews::new(&scroller, browser.clone());
+        overlay.set_child(Some(&mode_views.widget()));
         let state = Rc::new(ViewState {
             overlay,
             location_stack,
@@ -299,6 +304,7 @@ impl BrowserView {
             location_error,
             columns_widget,
             scroller,
+            mode_views: RefCell::new(mode_views),
             columns: RefCell::new(Vec::new()),
             hovered_column: Cell::new(None),
             cut_locations: RefCell::new(Vec::new()),
@@ -315,6 +321,19 @@ impl BrowserView {
             delete_progress: RefCell::new(None),
             browser,
         });
+
+        let weak_state = Rc::downgrade(&state);
+        state.mode_views.borrow().set_transfer_handler(Rc::new(
+            move |destination, sources, move_sources| {
+                if let Some(state) = weak_state.upgrade() {
+                    state.start_transfer(destination, sources, move_sources);
+                }
+            },
+        ));
+        state
+            .mode_views
+            .borrow()
+            .set_context_state(Rc::downgrade(&state));
 
         // The observer owns the view state while its window is alive. The window clears
         // the observer on destruction to break this deliberate lifecycle cycle.
@@ -396,13 +415,54 @@ impl BrowserView {
         self.state.active_new_folder.borrow().is_some()
     }
 
-    pub fn occupied_width(&self) -> i32 {
+    pub fn preview_occupied_width(&self) -> i32 {
+        if self.view_mode() != BrowserMode::Columns {
+            return single_pane_preview_reservation(self.state.overlay.width());
+        }
         self.state
             .columns
             .borrow()
             .iter()
             .map(|column| column.shell.width().max(COLUMN_WIDTH))
             .fold(0, i32::saturating_add)
+    }
+
+    pub fn view_mode(&self) -> BrowserMode {
+        self.state.mode_views.borrow().mode()
+    }
+
+    pub fn set_view_mode(&self, mode: BrowserMode) {
+        self.state.mode_views.borrow_mut().set_mode(mode);
+    }
+
+    pub fn set_density(&self, density: BrowserDensity) {
+        self.state.mode_views.borrow_mut().set_density(density);
+        self.state.overlay.remove_css_class("density-compact");
+        self.state.overlay.remove_css_class("density-airy");
+        self.state.overlay.add_css_class(match density {
+            BrowserDensity::Compact => "density-compact",
+            BrowserDensity::Airy => "density-airy",
+        });
+    }
+
+    pub fn activate_focused(&self) {
+        if self.view_mode() != BrowserMode::Columns {
+            self.state.browser.activate_focused_in_place();
+        } else {
+            self.state.browser.activate_focused();
+        }
+    }
+
+    pub fn navigate_left(&self) {
+        if self.view_mode() != BrowserMode::Columns {
+            self.state.browser.parent();
+        } else {
+            self.state.browser.focus_parent();
+        }
+    }
+
+    pub fn navigate_up(&self) {
+        self.state.browser.parent();
     }
 
     pub fn location_widget(&self) -> gtk::Widget {
@@ -439,6 +499,10 @@ impl BrowserView {
 
     pub fn set_single_click_previews(&self, enabled: bool) {
         self.state.single_click_previews.set(enabled);
+        self.state
+            .mode_views
+            .borrow()
+            .set_single_click_previews(enabled);
     }
 
     pub fn create_new_folder(&self) {
@@ -466,6 +530,7 @@ impl BrowserView {
     }
 
     pub fn copy_selection(&self) -> bool {
+        self.state.sync_mode_selection();
         let entries = self.state.browser.selected_entries();
         if entries.is_empty() {
             return false;
@@ -475,6 +540,7 @@ impl BrowserView {
     }
 
     pub fn cut_selection(&self) -> bool {
+        self.state.sync_mode_selection();
         let entries = self.state.browser.selected_entries();
         if entries.is_empty() {
             return false;
@@ -484,8 +550,12 @@ impl BrowserView {
     }
 
     pub fn select_all(&self) {
-        if let Some(depth) = self.state.columns.borrow().len().checked_sub(1) {
-            self.state.select_all(depth);
+        if self.view_mode() == BrowserMode::Columns {
+            if let Some(depth) = self.state.columns.borrow().len().checked_sub(1) {
+                self.state.select_all(depth);
+            }
+        } else if let Some(depth) = self.state.browser.active_depth() {
+            self.state.browser.select_all(depth);
         }
     }
 
@@ -515,11 +585,13 @@ impl BrowserView {
     }
 
     pub fn filter_has_focus(&self) -> bool {
-        self.state
-            .columns
-            .borrow()
-            .iter()
-            .any(|column| column.filter_entry.has_focus())
+        self.state.mode_views.borrow().filter_has_focus()
+            || self
+                .state
+                .columns
+                .borrow()
+                .iter()
+                .any(|column| column.filter_entry.has_focus())
     }
 
     pub fn dismiss_focused_filter(&self) -> bool {
@@ -541,6 +613,14 @@ impl BrowserView {
 }
 
 impl ViewState {
+    fn sync_mode_selection(&self) {
+        let Some((depth, positions)) = self.mode_views.borrow().selected_positions() else {
+            return;
+        };
+        let focused = positions.last().copied();
+        self.browser.set_selection(depth, &positions, focused);
+    }
+
     fn focused_column_depth(&self) -> Option<usize> {
         let focused = self.overlay.root()?.focus()?;
         self.columns.borrow().iter().position(|column| {
@@ -839,6 +919,7 @@ impl ViewState {
 
     fn refresh_cut_rows(&self) {
         let cut = self.cut_locations.borrow();
+        self.mode_views.borrow().set_cut_locations(&cut);
         for (depth, column) in self.columns.borrow().iter().enumerate() {
             column.bound_rows.borrow_mut().retain(|bound| {
                 let (Some(item), Some(row)) = (bound.item.upgrade(), bound.row.upgrade()) else {
@@ -1851,8 +1932,12 @@ impl ViewState {
         });
     }
 
-    fn begin_rename(&self) -> bool {
+    fn begin_rename(self: &Rc<Self>) -> bool {
         self.cancel_new_folder();
+        self.sync_mode_selection();
+        if self.mode_views.borrow().mode() != BrowserMode::Columns {
+            return self.begin_rename_dialog();
+        }
         let Some((depth, source_position, entry)) = self.browser.rename_item() else {
             return false;
         };
@@ -1898,6 +1983,69 @@ impl ViewState {
             label,
             spacer,
         }));
+        true
+    }
+
+    fn begin_rename_dialog(self: &Rc<Self>) -> bool {
+        let Some((_, _, entry)) = self.browser.rename_item() else {
+            return false;
+        };
+        let Some(parent) = self.overlay.root().and_downcast::<gtk::Window>() else {
+            return false;
+        };
+        let dialog = gtk::Window::builder()
+            .title("Rename")
+            .transient_for(&parent)
+            .modal(true)
+            .resizable(false)
+            .default_width(420)
+            .build();
+        let content = gtk::Box::new(gtk::Orientation::Vertical, 12);
+        content.add_css_class("delete-confirmation");
+        content.set_margin_top(16);
+        content.set_margin_bottom(16);
+        content.set_margin_start(18);
+        content.set_margin_end(18);
+        let title = gtk::Label::new(Some("Rename item"));
+        title.add_css_class("delete-confirmation-title");
+        title.set_xalign(0.0);
+        let field = gtk::Entry::new();
+        field.add_css_class("inline-rename");
+        field.set_text(&entry.display_name);
+        field.select_region(0, rename_stem_end(&entry.display_name));
+        let actions = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        actions.set_halign(gtk::Align::End);
+        let cancel = gtk::Button::with_label("Cancel");
+        cancel.add_css_class("delete-confirmation-cancel");
+        let rename = gtk::Button::with_label("Rename");
+        rename.add_css_class("delete-confirmation-delete");
+        actions.append(&cancel);
+        actions.append(&rename);
+        content.append(&title);
+        content.append(&field);
+        content.append(&actions);
+        dialog.set_child(Some(&content));
+        let cancelled = dialog.clone();
+        cancel.connect_clicked(move |_| cancelled.close());
+        let submit = Rc::new({
+            let weak = Rc::downgrade(self);
+            let dialog = dialog.clone();
+            let field = field.clone();
+            move || {
+                if let Some(state) = weak.upgrade() {
+                    let name = field.text().to_string();
+                    if !name.is_empty() && name != entry.display_name {
+                        state.browser.rename(entry.clone(), name);
+                    }
+                }
+                dialog.close();
+            }
+        });
+        let submit_button = submit.clone();
+        rename.connect_clicked(move |_| submit_button());
+        field.connect_activate(move |_| submit());
+        dialog.present();
+        field.grab_focus();
         true
     }
 
@@ -2070,6 +2218,7 @@ impl ViewState {
     }
 
     fn handle(self: &Rc<Self>, event: BrowserEvent) {
+        self.mode_views.borrow_mut().handle(&event);
         match event {
             BrowserEvent::Reset => {
                 self.truncate(0);
@@ -2230,7 +2379,9 @@ impl ViewState {
                             .list
                             .scroll_to(focused, gtk::ListScrollFlags::FOCUS, None);
                     }
-                    column.list.grab_focus();
+                    if self.mode_views.borrow().mode() == BrowserMode::Columns {
+                        column.list.grab_focus();
+                    }
                 }
             }
             BrowserEvent::FocusChanged { depth, position } => {
@@ -2243,7 +2394,9 @@ impl ViewState {
                             .list
                             .scroll_to(filtered_position, gtk::ListScrollFlags::FOCUS, None);
                     }
-                    column.list.grab_focus();
+                    if self.mode_views.borrow().mode() == BrowserMode::Columns {
+                        column.list.grab_focus();
+                    }
                 }
             }
             BrowserEvent::PreviewRequested { .. } => {}
@@ -2677,6 +2830,9 @@ impl ViewState {
                         selection_for_click.select_item(position, true);
                     }
                 }
+                if control || shift {
+                    gesture.set_state(gtk::EventSequenceState::Claimed);
+                }
                 modified_for_click.set(false);
 
                 let source_position =
@@ -2995,13 +3151,26 @@ impl ViewState {
         let presentation = LoadPresentation::new(&scroll, Some(retry));
         install_directory_drop_target(self, &presentation.stack, location.clone());
         install_folder_context_menu(self, &presentation.stack, &list, depth, location.clone());
+        let rows_for_context = bound_rows.clone();
+        let pick_position = Rc::new(move |picked: &gtk::Widget| {
+            let picked = file_row_target(picked.clone())?;
+            rows_for_context.borrow().iter().find_map(|bound| {
+                let row = bound.row.upgrade()?;
+                let item = bound.item.upgrade()?;
+                (row == picked).then_some(item.position())
+            })
+        });
+        let source_for_context = model.clone();
+        let filtered_for_context = filtered_model.clone();
+        let source_position = Rc::new(move |position| {
+            source_position_for_filtered(&source_for_context, &filtered_for_context, position)
+        });
         install_item_context_menu(
             self,
-            &list,
+            list.upcast_ref(),
             &selection,
-            &bound_rows,
-            &model,
-            &filtered_model,
+            pick_position,
+            source_position,
             depth,
         );
         column.append(&new_folder_row);
@@ -3123,7 +3292,7 @@ impl ViewState {
         });
     }
 
-    fn schedule_peek(
+    pub(super) fn schedule_peek(
         self: &Rc<Self>,
         origin_depth: usize,
         location: Location,
@@ -3154,7 +3323,7 @@ impl ViewState {
         self.pending_peek.replace(Some(source));
     }
 
-    fn schedule_close_peek(self: &Rc<Self>) {
+    pub(super) fn schedule_close_peek(self: &Rc<Self>) {
         cancel_source(&self.pending_peek);
         cancel_source(&self.pending_close);
 
@@ -3379,7 +3548,7 @@ fn basic_label_factory() -> gtk::SignalListItemFactory {
     factory
 }
 
-fn format_file_size(bytes: u64) -> String {
+pub(super) fn format_file_size(bytes: u64) -> String {
     const UNITS: [&str; 5] = ["B", "kB", "MB", "GB", "TB"];
     if bytes < 1_000 {
         return format!("{bytes} B");
@@ -3568,13 +3737,15 @@ fn install_folder_context_menu(
     parent.add_controller(menu_click);
 }
 
-fn install_item_context_menu(
+pub(super) type ContextPickPosition = Rc<dyn Fn(&gtk::Widget) -> Option<u32>>;
+pub(super) type ContextSourcePosition = Rc<dyn Fn(u32) -> Option<usize>>;
+
+pub(super) fn install_item_context_menu(
     state: &Rc<ViewState>,
-    list: &gtk::ListView,
+    widget: &gtk::Widget,
     selection: &gtk::MultiSelection,
-    bound_rows: &Rc<RefCell<Vec<BoundRow>>>,
-    source: &gtk::StringList,
-    filtered: &gtk::FilterListModel,
+    pick_position: ContextPickPosition,
+    source_position: ContextSourcePosition,
     depth: usize,
 ) {
     let in_trash = state
@@ -3663,7 +3834,7 @@ fn install_item_context_menu(
         .has_arrow(false)
         .build();
     popover.add_css_class("folder-context-popover");
-    popover.set_parent(list);
+    popover.set_parent(widget);
 
     let target = Rc::new(RefCell::new(None::<(usize, FileEntry)>));
     let weak = Rc::downgrade(state);
@@ -3677,7 +3848,11 @@ fn install_item_context_menu(
             return;
         };
         if let Some(state) = weak.upgrade() {
-            state.browser.activate(depth, position);
+            if state.mode_views.borrow().mode() == BrowserMode::Columns {
+                state.browser.activate(depth, position);
+            } else {
+                state.browser.activate_in_place(depth, position);
+            }
         }
     });
     let weak = Rc::downgrade(state);
@@ -3774,35 +3949,24 @@ fn install_item_context_menu(
     click.set_button(3);
     let weak_state = Rc::downgrade(state);
     let weak_popover = popover.downgrade();
-    let rows = bound_rows.clone();
     let selection = selection.clone();
-    let source = source.clone();
-    let filtered = filtered.clone();
     click.connect_pressed(move |gesture, _, x, y| {
         let Some(picked) = gesture
             .widget()
             .and_then(|widget| widget.pick(x, y, gtk::PickFlags::DEFAULT))
-            .and_then(file_row_target)
         else {
             return;
         };
-        let filtered_position = rows.borrow().iter().find_map(|bound| {
-            let row = bound.row.upgrade()?;
-            let item = bound.item.upgrade()?;
-            (row == picked).then_some(item.position())
-        });
-        let Some(filtered_position) = filtered_position else {
+        let Some(filtered_position) = pick_position(&picked) else {
             return;
         };
-        let Some(source_position) =
-            source_position_for_filtered(&source, &filtered, filtered_position)
-        else {
+        let Some(resolved_position) = source_position(filtered_position) else {
             return;
         };
         let Some(state) = weak_state.upgrade() else {
             return;
         };
-        let Some(entry) = state.browser.entry_at(depth, source_position) else {
+        let Some(entry) = state.browser.entry_at(depth, resolved_position) else {
             return;
         };
         gesture.set_state(gtk::EventSequenceState::Claimed);
@@ -3811,12 +3975,12 @@ fn install_item_context_menu(
         }
         let selected_positions = bitset_positions(&selection.selection())
             .into_iter()
-            .filter_map(|position| source_position_for_filtered(&source, &filtered, position))
+            .filter_map(|position| source_position(position))
             .collect::<Vec<_>>();
         state
             .browser
-            .set_selection(depth, &selected_positions, Some(source_position));
-        target.replace(Some((source_position, entry.clone())));
+            .set_selection(depth, &selected_positions, Some(resolved_position));
+        target.replace(Some((resolved_position, entry.clone())));
         let entries = state.browser.selected_entries();
         preview.set_visible(entry_supports_quick_preview(&entry));
         if entries.len() > 1 {
@@ -3841,14 +4005,14 @@ fn install_item_context_menu(
         )));
         popover.popup();
     });
-    list.add_controller(click);
+    widget.add_controller(click);
 }
 
 fn entry_responds_to_single_click(entry: &FileEntry, previews_enabled: bool) -> bool {
     entry.is_directory() || (previews_enabled && entry_supports_quick_preview(entry))
 }
 
-fn entry_supports_quick_preview(entry: &FileEntry) -> bool {
+pub(super) fn entry_supports_quick_preview(entry: &FileEntry) -> bool {
     if !matches!(entry.kind, EntryKind::File | EntryKind::FileSymbolicLink) {
         return false;
     }
@@ -3857,6 +4021,7 @@ fn entry_supports_quick_preview(entry: &FileEntry) -> bool {
         gio::content_type_guess(Some(Path::new(&entry.native_name)), None::<&[u8]>);
     !matches!(content_family(&content_type), PreviewContent::Unsupported)
         || gio::content_type_is_a(&content_type, "text/plain")
+        || has_plain_text_extension(&entry.native_name)
 }
 
 struct TrashSummary {
@@ -4248,7 +4413,7 @@ fn transfer_dropped_files(
     true
 }
 
-fn file_drop_action(target: &gtk::DropTarget) -> gtk::gdk::DragAction {
+pub(super) fn file_drop_action(target: &gtk::DropTarget) -> gtk::gdk::DragAction {
     let Some(drop) = target.current_drop() else {
         return gtk::gdk::DragAction::empty();
     };
@@ -4267,13 +4432,13 @@ fn preferred_file_drop_action(actions: gtk::gdk::DragAction, local: bool) -> gtk
     }
 }
 
-fn location_for_gio_file(file: &gio::File) -> Location {
+pub(super) fn location_for_gio_file(file: &gio::File) -> Location {
     file.path()
         .map(Location::local)
         .unwrap_or_else(|| Location::uri(file.uri().as_str()))
 }
 
-fn file_drag_content(entries: &[FileEntry]) -> Option<gtk::gdk::ContentProvider> {
+pub(super) fn file_drag_content(entries: &[FileEntry]) -> Option<gtk::gdk::ContentProvider> {
     let files = entries
         .iter()
         .map(|entry| gio_file_for_location(&entry.location))
@@ -4394,7 +4559,7 @@ fn context_menu_option(label: &str, accelerator: Option<&str>) -> gtk::Button {
     button
 }
 
-fn column_sort_menu(browser: &Rc<Browser>, depth: usize) -> gtk::MenuButton {
+pub(super) fn column_sort_menu(browser: &Rc<Browser>, depth: usize) -> gtk::MenuButton {
     let content = gtk::Box::new(gtk::Orientation::Vertical, 2);
     content.add_css_class("column-menu");
     let heading = gtk::Label::new(Some("SORT BY"));
@@ -4458,7 +4623,10 @@ fn column_sort_menu(browser: &Rc<Browser>, depth: usize) -> gtk::MenuButton {
     button
 }
 
-fn column_sort_direction_toggle(browser: &Rc<Browser>, depth: usize) -> gtk::ToggleButton {
+pub(super) fn column_sort_direction_toggle(
+    browser: &Rc<Browser>,
+    depth: usize,
+) -> gtk::ToggleButton {
     let button = gtk::ToggleButton::builder()
         .tooltip_text("Ascending — click to reverse")
         .build();
@@ -4578,7 +4746,7 @@ fn model_is_directory(value: &str) -> bool {
     value.starts_with("d\t")
 }
 
-fn entry_icon(entry: &FileEntry) -> &'static str {
+pub(super) fn entry_icon(entry: &FileEntry) -> &'static str {
     if entry.is_broken_symbolic_link() {
         return crate::assets::icons::X;
     }
@@ -4664,6 +4832,10 @@ fn animate_column_entry(shell: &gtk::Box, column: &gtk::Box, generation: &Rc<Cel
             glib::ControlFlow::Continue
         }
     });
+}
+
+fn single_pane_preview_reservation(width: i32) -> i32 {
+    width.max(0) / 2
 }
 
 fn resized_column_width(initial_width: i32, horizontal_offset: f64) -> i32 {

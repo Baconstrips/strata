@@ -253,6 +253,12 @@ fn cut_clipboard_locations_match_regardless_of_order() {
 }
 
 #[test]
+fn single_pane_modes_reserve_half_for_preview_sizing() {
+    assert_eq!(single_pane_preview_reservation(800), 400);
+    assert_eq!(single_pane_preview_reservation(0), 0);
+}
+
+#[test]
 fn pane_resizing_preserves_the_initial_minimum_width() {
     assert_eq!(resized_column_width(COLUMN_WIDTH, -80.0), COLUMN_WIDTH);
     assert_eq!(resized_column_width(COLUMN_WIDTH, 75.0), 375);

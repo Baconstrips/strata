@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use std::rc::Rc;
+use std::{ffi::OsStr, path::Path, rc::Rc};
 
 use crate::model::FileEntry;
 
@@ -46,6 +46,13 @@ pub enum PreviewEvent {
 
 pub trait PreviewProvider {
     fn load(&self, request: PreviewRequest, emit: Rc<dyn Fn(PreviewEvent)>) -> LoadHandle;
+}
+
+pub(crate) fn has_plain_text_extension(name: &OsStr) -> bool {
+    Path::new(name)
+        .extension()
+        .and_then(OsStr::to_str)
+        .is_some_and(|extension| matches!(extension.to_ascii_lowercase().as_str(), "conf" | "ini"))
 }
 
 pub(crate) fn content_family(content_type: &str) -> PreviewContent {

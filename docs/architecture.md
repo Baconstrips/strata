@@ -47,6 +47,15 @@ Dependencies point inward. A filesystem adapter must not manipulate widgets, and
 
 Models should distinguish “unknown/not loaded” from meaningful empty values.
 
+### Browser presentation modes
+
+Browser presentations consume the same `BrowserEvent` stream and send intents back to the same
+application controller. Miller list columns, the single-pane grid, and the single-pane explorer must not
+own independent filesystem or navigation state. Mode-specific widget construction and interaction
+policy live behind the UI presentation boundary (`ui/browser_modes.rs`); shared operations stay in
+the application layer. A future mode should therefore add a renderer rather than add mode checks to
+filesystem, navigation, or operation code.
+
 ## Capability boundaries
 
 ### File source

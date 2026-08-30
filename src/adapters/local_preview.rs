@@ -8,7 +8,7 @@ use crate::{
     model::Location,
     services::{
         LoadHandle, Preview, PreviewContent, PreviewEvent, PreviewProvider, PreviewRequest,
-        content_family,
+        content_family, has_plain_text_extension,
     },
 };
 
@@ -45,7 +45,8 @@ impl PreviewProvider for LocalPreviewProvider {
                 .unwrap_or_else(|| "application/octet-stream".to_owned());
             let mut content = content_family(&content_type);
             if matches!(content, PreviewContent::Unsupported)
-                && gio::content_type_is_a(&content_type, "text/plain")
+                && (gio::content_type_is_a(&content_type, "text/plain")
+                    || has_plain_text_extension(&entry.native_name))
             {
                 content = PreviewContent::Text {
                     content: String::new(),

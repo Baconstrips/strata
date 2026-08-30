@@ -4,4 +4,4 @@ mod browser;
 mod navigation;
 mod peek;
 
-pub use browser::{Browser, BrowserEvent};
+pub use browser::{Browser, BrowserColumnSnapshot, BrowserEvent};

@@ -13,7 +13,11 @@ use std::{
 use gtk::{gdk, gio, glib};
 
 pub mod icons {
+    pub const ARROW_DOWN: &str = "strata-arrow-down";
     pub const ARROW_DOWN_WIDE_NARROW: &str = "strata-arrow-down-wide-narrow";
+    pub const ARROW_LEFT: &str = "strata-arrow-left";
+    pub const ARROW_RIGHT: &str = "strata-arrow-right";
+    pub const ARROW_UP: &str = "strata-arrow-up";
     pub const ARROW_UP_NARROW_WIDE: &str = "strata-arrow-up-narrow-wide";
     pub const CHECK: &str = "strata-check";
     pub const CHECK_ON_PRIMARY: &str = "strata-check-on-primary";

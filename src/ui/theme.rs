@@ -73,6 +73,10 @@ struct Preferences {
     theme: String,
     #[serde(default = "default_enabled")]
     single_click_previews: bool,
+    #[serde(default = "default_browser_mode")]
+    browser_mode: String,
+    #[serde(default = "default_browser_density")]
+    browser_density: String,
 }
 
 impl Default for Preferences {
@@ -81,12 +85,22 @@ impl Default for Preferences {
             mode: "theme".to_owned(),
             theme: "azure-glow".to_owned(),
             single_click_previews: true,
+            browser_mode: default_browser_mode(),
+            browser_density: default_browser_density(),
         }
     }
 }
 
 fn default_enabled() -> bool {
     true
+}
+
+fn default_browser_mode() -> String {
+    "columns".to_owned()
+}
+
+fn default_browser_density() -> String {
+    "compact".to_owned()
 }
 
 pub struct ThemeManager {
@@ -162,6 +176,40 @@ impl ThemeManager {
 
     pub fn set_single_click_previews(&self, enabled: bool) {
         self.preferences.borrow_mut().single_click_previews = enabled;
+        self.save_preferences();
+    }
+
+    pub fn browser_mode(&self) -> super::browser_modes::BrowserMode {
+        match self.preferences.borrow().browser_mode.as_str() {
+            "grid" => super::browser_modes::BrowserMode::Grid,
+            "explorer" => super::browser_modes::BrowserMode::Explorer,
+            _ => super::browser_modes::BrowserMode::Columns,
+        }
+    }
+
+    pub fn set_browser_mode(&self, mode: super::browser_modes::BrowserMode) {
+        self.preferences.borrow_mut().browser_mode = match mode {
+            super::browser_modes::BrowserMode::Columns => "columns",
+            super::browser_modes::BrowserMode::Grid => "grid",
+            super::browser_modes::BrowserMode::Explorer => "explorer",
+        }
+        .to_owned();
+        self.save_preferences();
+    }
+
+    pub fn browser_density(&self) -> super::browser_modes::BrowserDensity {
+        match self.preferences.borrow().browser_density.as_str() {
+            "airy" => super::browser_modes::BrowserDensity::Airy,
+            _ => super::browser_modes::BrowserDensity::Compact,
+        }
+    }
+
+    pub fn set_browser_density(&self, density: super::browser_modes::BrowserDensity) {
+        self.preferences.borrow_mut().browser_density = match density {
+            super::browser_modes::BrowserDensity::Compact => "compact",
+            super::browser_modes::BrowserDensity::Airy => "airy",
+        }
+        .to_owned();
         self.save_preferences();
     }
 

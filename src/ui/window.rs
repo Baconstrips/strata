@@ -19,6 +19,7 @@ use crate::{
 use super::{
     blur::BlurBin,
     browser::{BrowserView, PeekBehavior},
+    browser_modes::{BrowserDensity, BrowserMode},
     motion::{animations_enabled, emphasized_deceleration},
     preview::PreviewDrawer,
 };
@@ -44,6 +45,8 @@ pub fn present_location(application: &gtk::Application, location: Option<PathBuf
         .build();
 
     let browser = BrowserView::new(Rc::new(LocalFileSource), PeekBehavior::default());
+    browser.set_view_mode(theme_manager.browser_mode());
+    browser.set_density(theme_manager.browser_density());
     browser.set_operation_provider(Rc::new(LocalOperationProvider));
     let controller = browser.browser();
     let preview = PreviewDrawer::new(Rc::new(LocalPreviewProvider));
@@ -89,7 +92,7 @@ pub fn present_location(application: &gtk::Application, location: Option<PathBuf
         20,
     )));
     search_button.add_css_class("header-action");
-    let appearance = build_appearance_menu(&controller);
+    let appearance = build_appearance_menu(&browser, &controller, theme_manager.clone());
     let settings = gtk::Button::builder().tooltip_text("Settings").build();
     settings.set_child(Some(&crate::assets::text_icon(
         crate::assets::icons::SETTINGS,
@@ -161,7 +164,7 @@ pub fn present_location(application: &gtk::Application, location: Option<PathBuf
     let measured_browser = browser.clone();
     preview.attach_split(
         &preview_split,
-        Rc::new(move || measured_content.position() + measured_browser.occupied_width()),
+        Rc::new(move || measured_content.position() + measured_browser.preview_occupied_width()),
     );
     root.append(&preview_split);
 
@@ -367,6 +370,13 @@ fn install_keyboard_navigation(
             preview.close();
             return glib::Propagation::Stop;
         }
+        if view.filter_has_focus() && !control && !alt {
+            return glib::Propagation::Proceed;
+        }
+        if key == gtk::gdk::Key::BackSpace && !control && !alt {
+            view.navigate_up();
+            return glib::Propagation::Stop;
+        }
         if shift && key == gtk::gdk::Key::Up {
             browser.extend_selection(-1);
             return glib::Propagation::Stop;
@@ -385,14 +395,14 @@ fn install_keyboard_navigation(
             }
             (gtk::gdk::Key::j | gtk::gdk::Key::Down, false) => browser.move_selection(1),
             (gtk::gdk::Key::k | gtk::gdk::Key::Up, false) => browser.move_selection(-1),
-            (gtk::gdk::Key::h | gtk::gdk::Key::Left, false) => browser.focus_parent(),
+            (gtk::gdk::Key::h | gtk::gdk::Key::Left, false) => view.navigate_left(),
             (
                 gtk::gdk::Key::l
                 | gtk::gdk::Key::Right
                 | gtk::gdk::Key::Return
                 | gtk::gdk::Key::KP_Enter,
                 false,
-            ) => browser.activate_focused(),
+            ) => view.activate_focused(),
             (gtk::gdk::Key::Escape, false) => browser.escape(),
             _ => return glib::Propagation::Proceed,
         }
@@ -426,22 +436,92 @@ fn install_modal_focus_trap(window: &gtk::ApplicationWindow) {
     });
 }
 
-fn build_appearance_menu(controller: &Rc<Browser>) -> gtk::MenuButton {
+fn build_appearance_menu(
+    view: &BrowserView,
+    controller: &Rc<Browser>,
+    preferences: Rc<super::theme::ThemeManager>,
+) -> gtk::MenuButton {
     let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
     content.add_css_class("appearance-menu");
     append_menu_heading(&content, "VIEW");
-    let (list, _, _) = appearance_option(crate::assets::icons::LIST, "List", true, true);
+    let current_mode = view.view_mode();
+    let (list, list_check, _) = appearance_option(
+        crate::assets::icons::LIST,
+        "List",
+        current_mode == BrowserMode::Columns,
+        true,
+    );
+    let (grid, grid_check, _) = appearance_option(
+        crate::assets::icons::GRID,
+        "Grid",
+        current_mode == BrowserMode::Grid,
+        true,
+    );
+    let (explorer, explorer_check, _) = appearance_option(
+        crate::assets::icons::ROWS,
+        "Explorer",
+        current_mode == BrowserMode::Explorer,
+        true,
+    );
+    for (button, mode) in [
+        (&list, BrowserMode::Columns),
+        (&grid, BrowserMode::Grid),
+        (&explorer, BrowserMode::Explorer),
+    ] {
+        let view = view.clone();
+        let list_check = list_check.clone();
+        let grid_check = grid_check.clone();
+        let explorer_check = explorer_check.clone();
+        let preferences = preferences.clone();
+        button.connect_clicked(move |_| {
+            view.set_view_mode(mode);
+            preferences.set_browser_mode(mode);
+            list_check.set_visible(mode == BrowserMode::Columns);
+            grid_check.set_visible(mode == BrowserMode::Grid);
+            explorer_check.set_visible(mode == BrowserMode::Explorer);
+        });
+    }
     content.append(&list);
-    let (grid, _, _) = appearance_option(crate::assets::icons::GRID, "Grid", false, false);
-    grid.set_tooltip_text(Some("Grid view is planned"));
     content.append(&grid);
+    content.append(&explorer);
 
     content.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
     append_menu_heading(&content, "DENSITY");
-    let (compact, _, _) = appearance_option(crate::assets::icons::ROWS, "Compact", true, true);
+    let current_density = preferences.browser_density();
+    let (compact, compact_check, _) = appearance_option(
+        crate::assets::icons::ROWS,
+        "Compact",
+        current_density == BrowserDensity::Compact,
+        true,
+    );
+    let (airy, airy_check, _) = appearance_option(
+        crate::assets::icons::ROWS,
+        "Airy",
+        current_density == BrowserDensity::Airy,
+        true,
+    );
+    {
+        let view = view.clone();
+        let compact_check = compact_check.clone();
+        let airy_check = airy_check.clone();
+        let preferences = preferences.clone();
+        compact.connect_clicked(move |_| {
+            view.set_density(BrowserDensity::Compact);
+            preferences.set_browser_density(BrowserDensity::Compact);
+            compact_check.set_visible(true);
+            airy_check.set_visible(false);
+        });
+    }
+    {
+        let view = view.clone();
+        airy.connect_clicked(move |_| {
+            view.set_density(BrowserDensity::Airy);
+            preferences.set_browser_density(BrowserDensity::Airy);
+            compact_check.set_visible(false);
+            airy_check.set_visible(true);
+        });
+    }
     content.append(&compact);
-    let (airy, _, _) = appearance_option(crate::assets::icons::ROWS, "Airy", false, false);
-    airy.set_tooltip_text(Some("Airy density is planned"));
     content.append(&airy);
 
     content.append(&gtk::Separator::new(gtk::Orientation::Horizontal));

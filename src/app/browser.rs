@@ -17,6 +17,14 @@ use crate::{
 };
 
 #[derive(Clone, Debug)]
+pub struct BrowserColumnSnapshot {
+    pub location: Location,
+    pub entries: Vec<FileEntry>,
+    pub selected_positions: Vec<usize>,
+    pub loading: bool,
+}
+
+#[derive(Clone, Debug)]
 pub enum BrowserEvent {
     Reset,
     ColumnsTruncated {
@@ -335,6 +343,13 @@ impl Browser {
         self.apply_column_preferences(depth, |preferences| preferences.sort_key = sort_key);
     }
 
+    pub fn set_sort(&self, depth: usize, sort_key: SortKey, sort_direction: SortDirection) {
+        self.apply_column_preferences(depth, |preferences| {
+            preferences.sort_key = sort_key;
+            preferences.sort_direction = sort_direction;
+        });
+    }
+
     pub fn set_sort_direction(&self, depth: usize, sort_direction: SortDirection) {
         self.apply_column_preferences(depth, |preferences| {
             preferences.sort_direction = sort_direction;
@@ -426,6 +441,21 @@ impl Browser {
         self.state.borrow().entry_at(depth, position)
     }
 
+    pub fn column_preferences(&self, depth: usize) -> Option<ViewPreferences> {
+        self.state.borrow().column_preferences(depth)
+    }
+
+    pub fn column_snapshot(&self, depth: usize) -> Option<BrowserColumnSnapshot> {
+        let state = self.state.borrow();
+        let column = state.columns.get(depth)?;
+        Some(BrowserColumnSnapshot {
+            location: column.location.clone(),
+            entries: column.entries.clone(),
+            selected_positions: state.selected_positions(depth),
+            loading: column.load_state == crate::app::navigation::LoadState::Loading,
+        })
+    }
+
     pub fn focused_item(&self) -> Option<(usize, usize, FileEntry)> {
         self.state.borrow().focused_entry()
     }
@@ -457,6 +487,31 @@ impl Browser {
                 selected = state.selected_entries().len(),
                 "selection changed"
             );
+        }
+    }
+
+    pub fn select_all(&self, depth: usize) {
+        let count = self
+            .state
+            .borrow()
+            .columns
+            .get(depth)
+            .map_or(0, |column| column.entries.len());
+        if count == 0 {
+            return;
+        }
+        let positions: Vec<_> = (0..count).collect();
+        let focused = count - 1;
+        if self
+            .state
+            .borrow_mut()
+            .set_selection(depth, &positions, Some(focused))
+        {
+            self.emit(BrowserEvent::SelectionSetChanged {
+                depth,
+                positions,
+                focused,
+            });
         }
     }
 
@@ -739,6 +794,29 @@ impl Browser {
     pub fn activate(self: &Rc<Self>, depth: usize, position: usize) {
         self.select(depth, position);
         self.activate_focused();
+    }
+
+    /// Activates an item using conventional single-pane explorer navigation.
+    pub fn activate_in_place(self: &Rc<Self>, depth: usize, position: usize) {
+        self.select(depth, position);
+        let Some(entry) = self.entry_at(depth, position) else {
+            return;
+        };
+        if entry.is_directory() {
+            self.navigate(entry.location);
+        } else {
+            self.emit(BrowserEvent::OpenRequested {
+                location: entry.location,
+            });
+        }
+    }
+
+    pub fn activate_focused_in_place(self: &Rc<Self>) {
+        let Some((depth, position, _)) = self.focused_item() else {
+            self.move_selection(1);
+            return;
+        };
+        self.activate_in_place(depth, position);
     }
 
     pub fn move_selection(&self, direction: i32) {

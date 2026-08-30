@@ -598,6 +598,35 @@ fn single_click_action_descends_into_directories() {
 }
 
 #[test]
+fn explorer_activation_replaces_the_directory_instead_of_adding_a_column() {
+    let browser = Browser::new(Rc::new(FakeFileSource));
+    let events = Rc::new(RefCell::new(Vec::new()));
+    let observed = events.clone();
+    browser.observe(move |event| observed.borrow_mut().push(event));
+    browser.navigate(Location::local("/fixture"));
+    events.borrow_mut().clear();
+
+    browser.activate_in_place(0, 0);
+
+    assert_eq!(
+        browser.active_location(),
+        Some(Location::local("/fixture/child"))
+    );
+    assert!(
+        events
+            .borrow()
+            .iter()
+            .any(|event| matches!(event, BrowserEvent::ColumnAdded { depth: 0, .. }))
+    );
+    assert!(
+        !events
+            .borrow()
+            .iter()
+            .any(|event| matches!(event, BrowserEvent::ColumnAdded { depth: 1, .. }))
+    );
+}
+
+#[test]
 fn open_folder_remains_the_rename_target_until_its_pane_has_a_selection() {
     let browser = Browser::new(Rc::new(FakeFileSource));
     browser.navigate(Location::local("/fixture"));

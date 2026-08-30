@@ -72,6 +72,8 @@ theme = "azure-glow"
     .expect("legacy preferences should remain valid");
 
     assert!(preferences.single_click_previews);
+    assert_eq!(preferences.browser_mode, "columns");
+    assert_eq!(preferences.browser_density, "compact");
 }
 
 #[test]

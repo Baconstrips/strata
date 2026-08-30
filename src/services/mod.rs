@@ -12,7 +12,7 @@ pub use operations::{
     CreateDirectoryRequest, DeleteRequest, OperationEvent, OperationProvider, OperationRequestId,
     PasteRequest, RenameRequest, RestoreRequest,
 };
-pub(crate) use preview::content_family;
 pub use preview::{
     Preview, PreviewContent, PreviewEvent, PreviewProvider, PreviewRequest, PreviewRequestId,
 };
+pub(crate) use preview::{content_family, has_plain_text_extension};
