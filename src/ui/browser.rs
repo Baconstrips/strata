@@ -347,10 +347,8 @@ impl BrowserView {
                 .widget()
                 .and_then(|widget| widget.pick(x, y, gtk::PickFlags::DEFAULT))
                 .is_some_and(is_breadcrumb_target);
-            if !clicked_button {
-                if let Some(state) = weak_state.upgrade() {
-                    state.begin_location_edit();
-                }
+            if !clicked_button && let Some(state) = weak_state.upgrade() {
+                state.begin_location_edit();
             }
         });
         breadcrumb_scroller.add_controller(edit_location);

@@ -59,7 +59,7 @@ The architectural boundaries and performance workflow are documented in [`docs/a
 
 ### Requirements
 
-- Rust 1.85 or newer
+- The latest stable Rust release
 - GTK 4.12 or newer
 - GtkSourceView 5
 - Poppler GLib
@@ -93,7 +93,7 @@ Run the standard quality checks:
 ./scripts/check.sh
 ```
 
-The script always runs formatting, compilation, Clippy, and tests. It also runs dependency-policy and spelling checks when `cargo-deny` and `typos` are installed. CI runs the complete suite, including the minimum supported Rust version.
+The script always runs formatting, compilation, Clippy, and tests. It also runs dependency-policy and spelling checks when `cargo-deny` and `typos` are installed. CI runs the complete suite on the latest stable Rust release.
 
 ## Bundled assets
 

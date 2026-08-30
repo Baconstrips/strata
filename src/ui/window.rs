@@ -572,12 +572,11 @@ impl SidebarState {
         self.append_separator();
 
         for place in self.place_order.borrow().clone() {
-            if let Some((icon, name, directory)) = standard_place(place) {
-                if let Some(path) = glib::user_special_dir(directory)
+            if let Some((icon, name, directory)) = standard_place(place)
+                && let Some(path) = glib::user_special_dir(directory)
                     .filter(|path| should_show_standard_place(place, path, &home_directory()))
-                {
-                    self.append_reorderable_place(place, icon, name, Location::local(path));
-                }
+            {
+                self.append_reorderable_place(place, icon, name, Location::local(path));
             }
         }
 

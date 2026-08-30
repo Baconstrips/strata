@@ -46,7 +46,7 @@ CI additionally runs:
 
 - `cargo-deny` for security advisories, dependency licenses, duplicate versions, and unapproved sources
 - `typos` for spelling
-- Compilation with the minimum supported Rust version declared in `Cargo.toml`
+- Compilation with the latest stable Rust release
 
 Install the optional local tools with:
 

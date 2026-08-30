@@ -296,10 +296,11 @@ impl ThemeManager {
         };
         let weak = Rc::downgrade(self);
         monitor.connect_changed(move |_, _, _, _| {
-            if let Some(manager) = weak.upgrade() {
-                if manager.follows_omarchy() && !manager.previewing.get() {
-                    manager.apply_selected();
-                }
+            if let Some(manager) = weak.upgrade()
+                && manager.follows_omarchy()
+                && !manager.previewing.get()
+            {
+                manager.apply_selected();
             }
         });
         self.omarchy_monitor.replace(Some(monitor));

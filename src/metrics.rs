@@ -28,14 +28,14 @@ pub fn mark_batch_rendered(entries: usize, render_started: Instant) {
     let render_micros = render_started.elapsed().as_micros() as u64;
     tracing::debug!(entries, render_micros, "directory batch rendered");
 
-    if !FIRST_BATCH_RENDERED.swap(true, Ordering::Relaxed) {
-        if let Some(started) = STARTED.get() {
-            tracing::info!(
-                entries,
-                render_micros,
-                elapsed_ms = started.elapsed().as_millis() as u64,
-                "first directory batch rendered"
-            );
-        }
+    if !FIRST_BATCH_RENDERED.swap(true, Ordering::Relaxed)
+        && let Some(started) = STARTED.get()
+    {
+        tracing::info!(
+            entries,
+            render_micros,
+            elapsed_ms = started.elapsed().as_millis() as u64,
+            "first directory batch rendered"
+        );
     }
 }
