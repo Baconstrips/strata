@@ -184,10 +184,9 @@ fn sandbox_command(
     command.args([
         "--",
         "/usr/bin/prlimit",
-        "--as=536870912",
+        "--as=1073741824",
         "--cpu=10",
         "--fsize=33554432",
-        "--nproc=64",
         "--",
         "/app/strata",
         "--preview-helper",
