@@ -102,6 +102,18 @@ impl NavigationState {
         true
     }
 
+    pub fn can_go_back(&self) -> bool {
+        !self.back_history.is_empty()
+    }
+
+    pub fn can_go_forward(&self) -> bool {
+        !self.forward_history.is_empty()
+    }
+
+    pub fn can_go_parent(&self) -> bool {
+        self.current_path().and_then(|path| path.parent()).is_some()
+    }
+
     pub fn go_back(&mut self) -> Option<NavigationPath> {
         let target = self.back_history.pop()?;
         if let Some(current) = self.current_path() {

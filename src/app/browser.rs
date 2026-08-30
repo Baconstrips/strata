@@ -451,6 +451,18 @@ impl Browser {
         });
     }
 
+    pub fn can_go_back(&self) -> bool {
+        self.state.borrow().can_go_back()
+    }
+
+    pub fn can_go_forward(&self) -> bool {
+        self.state.borrow().can_go_forward()
+    }
+
+    pub fn can_go_parent(&self) -> bool {
+        self.state.borrow().can_go_parent()
+    }
+
     pub fn back(self: &Rc<Self>) {
         let target = self.state.borrow_mut().go_back();
         if let Some(target) = target {

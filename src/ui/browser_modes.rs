@@ -1419,24 +1419,30 @@ fn column_resize_handle(
 fn explorer_navigation(browser: &Rc<Browser>) -> gtk::Box {
     let actions = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     actions.add_css_class("explorer-navigation");
-    for (icon, tooltip, action) in [
+    for (icon, tooltip, action, available) in [
         (
             crate::assets::icons::ARROW_LEFT,
             "Back (Alt+Left)",
             Browser::back as fn(&Rc<Browser>),
+            browser.can_go_back(),
         ),
         (
             crate::assets::icons::ARROW_RIGHT,
             "Forward (Alt+Right)",
             Browser::forward as fn(&Rc<Browser>),
+            browser.can_go_forward(),
         ),
         (
             crate::assets::icons::ARROW_UP,
             "Parent folder (Alt+Up)",
             Browser::parent as fn(&Rc<Browser>),
+            browser.can_go_parent(),
         ),
     ] {
-        let button = gtk::Button::builder().tooltip_text(tooltip).build();
+        let button = gtk::Button::builder()
+            .tooltip_text(tooltip)
+            .sensitive(available)
+            .build();
         button.set_child(Some(&crate::assets::text_icon(icon, 16)));
         button.add_css_class("explorer-navigation-button");
         let weak_browser = Rc::downgrade(browser);

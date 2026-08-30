@@ -2139,12 +2139,20 @@ menubutton.grid-thumbnail-menu > button:focus-visible {
   opacity: 0.55;
 }
 
-.explorer-navigation-button:hover {
+.explorer-navigation-button:disabled {
+  opacity: 0.35;
+}
+
+.explorer-navigation-button:disabled image {
+  opacity: 1;
+}
+
+.explorer-navigation-button:hover:not(:disabled) {
   background: alpha(@theme_muted, 0.56);
   color: @theme_text;
 }
 
-.explorer-navigation-button:hover image,
+.explorer-navigation-button:hover:not(:disabled) image,
 .explorer-navigation-button:active image,
 .explorer-navigation-button:focus-visible image {
   opacity: 1;

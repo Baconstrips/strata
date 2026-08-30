@@ -323,6 +323,26 @@ fn empty_is_distinct_from_loading_and_error() {
 }
 
 #[test]
+fn navigation_availability_tracks_history_and_parent() {
+    let mut state = NavigationState::default();
+    assert!(!state.can_go_back());
+    assert!(!state.can_go_forward());
+    assert!(!state.can_go_parent());
+
+    state.navigate(location("/"), RequestId(1));
+    assert!(!state.can_go_parent());
+    state.navigate(location("/home"), RequestId(2));
+    assert!(state.can_go_back());
+    assert!(state.can_go_parent());
+    assert!(!state.can_go_forward());
+
+    let back = state.go_back().expect("back history should be available");
+    state.restore(back, [RequestId(3)]);
+    assert!(!state.can_go_back());
+    assert!(state.can_go_forward());
+}
+
+#[test]
 fn back_and_forward_restore_committed_paths() {
     let mut state = NavigationState::default();
     state.navigate(location("/home"), RequestId(1));
