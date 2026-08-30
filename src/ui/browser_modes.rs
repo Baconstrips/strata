@@ -53,6 +53,11 @@ pub enum BrowserDensity {
     Airy,
 }
 
+struct ActiveModeRename {
+    field: gtk::Entry,
+    label: gtk::Label,
+}
+
 struct BoundModeItem {
     item: glib::WeakRef<gtk::ListItem>,
     widget: glib::WeakRef<gtk::Widget>,
@@ -85,6 +90,7 @@ pub struct ModeViews {
     transfer_handler: TransferHandlerSlot,
     cut_locations: Rc<RefCell<Vec<Location>>>,
     context_state: RefCell<Option<Weak<super::browser::ViewState>>>,
+    active_rename: Rc<RefCell<Option<ActiveModeRename>>>,
     mode: BrowserMode,
     density: BrowserDensity,
 }
@@ -131,6 +137,7 @@ impl ModeViews {
             transfer_handler: Rc::new(RefCell::new(None)),
             cut_locations: Rc::new(RefCell::new(Vec::new())),
             context_state: RefCell::new(None),
+            active_rename: Rc::new(RefCell::new(None)),
             mode: BrowserMode::Columns,
             density: BrowserDensity::Compact,
         }
@@ -159,6 +166,80 @@ impl ModeViews {
         Some((pane.depth, positions))
     }
 
+    pub fn rename_is_active(&self) -> bool {
+        self.active_rename.borrow().is_some()
+    }
+
+    pub fn cancel_rename(&self) -> bool {
+        let Some(rename) = self.active_rename.take() else {
+            return false;
+        };
+        rename.label.set_visible(true);
+        rename.field.unparent();
+        true
+    }
+
+    pub fn begin_rename(&self, depth: usize, source_position: usize, entry: &FileEntry) -> bool {
+        self.cancel_rename();
+        let pane = match self.mode {
+            BrowserMode::Columns => return false,
+            BrowserMode::Grid => self.grid_panes.iter().find(|pane| pane.depth == depth),
+            BrowserMode::Explorer => self
+                .explorer_pane
+                .as_ref()
+                .filter(|pane| pane.depth == depth),
+        };
+        let Some(pane) = pane else {
+            return false;
+        };
+        let Some(position) =
+            view_position_for_source(&pane.model, pane.filtered_model.as_ref(), source_position)
+        else {
+            return false;
+        };
+        let widget = pane.bound_items.borrow().iter().find_map(|bound| {
+            let item = bound.item.upgrade()?;
+            (item.position() == position).then(|| bound.widget.upgrade())?
+        });
+        let Some(widget) = widget else {
+            return false;
+        };
+        let Some(label) =
+            descendant_with_class(&widget, "alternate-rename-label").and_downcast::<gtk::Label>()
+        else {
+            return false;
+        };
+        let Some(parent) = label.parent().and_downcast::<gtk::Box>() else {
+            return false;
+        };
+        let field = gtk::Entry::new();
+        field.add_css_class("inline-rename");
+        field.set_width_chars(12);
+        field.set_text(&entry.display_name);
+        label.set_visible(false);
+        parent.append(&field);
+        let browser = Rc::downgrade(&self.browser);
+        let renamed_entry = entry.clone();
+        let active = self.active_rename.clone();
+        field.connect_activate(move |field| {
+            let name = field.text().to_string();
+            if name == renamed_entry.display_name {
+                if let Some(rename) = active.take() {
+                    rename.label.set_visible(true);
+                    rename.field.unparent();
+                }
+            } else if let Some(browser) = browser.upgrade() {
+                field.set_sensitive(false);
+                browser.rename(renamed_entry.clone(), name);
+            }
+        });
+        field.grab_focus();
+        field.select_region(0, super::browser::rename_stem_end(&entry.display_name));
+        self.active_rename
+            .replace(Some(ActiveModeRename { field, label }));
+        true
+    }
+
     pub fn filter_has_focus(&self) -> bool {
         self.grid_panes
             .iter()
@@ -167,6 +248,7 @@ impl ModeViews {
     }
 
     pub fn set_mode(&mut self, mode: BrowserMode) {
+        self.cancel_rename();
         self.mode = mode;
         self.stack.set_visible_child_name(match mode {
             BrowserMode::Columns => "columns",
@@ -331,6 +413,17 @@ impl ModeViews {
                     set_selections(pane, &position.iter().copied().collect::<Vec<_>>());
                 }
                 self.focus_visible_pane(*depth);
+            }
+            BrowserEvent::RenameCompleted => {
+                self.cancel_rename();
+            }
+            BrowserEvent::RenameFailed { message } => {
+                if let Some(rename) = self.active_rename.borrow().as_ref() {
+                    rename.field.set_sensitive(true);
+                    rename.field.add_css_class("error");
+                    rename.field.set_tooltip_text(Some(message));
+                    rename.field.grab_focus();
+                }
             }
             _ => {}
         }
@@ -576,6 +669,7 @@ fn build_grid_pane(
         icon.add_css_class("grid-card-icon");
         let label = gtk::Label::new(None);
         label.add_css_class("grid-card-label");
+        label.add_css_class("alternate-rename-label");
         label.set_justify(gtk::Justification::Center);
         label.set_width_chars(12);
         label.set_max_width_chars(16);
@@ -956,6 +1050,7 @@ fn build_explorer_pane(
         let icon = gtk::Image::new();
         icon.set_pixel_size(18);
         let name = gtk::Label::new(None);
+        name.add_css_class("alternate-rename-label");
         name.set_xalign(0.0);
         name.set_hexpand(true);
         name.set_ellipsize(gtk::pango::EllipsizeMode::End);
@@ -1299,6 +1394,20 @@ fn collection_with_marquee(
     });
     view.add_controller(clear);
     overlay
+}
+
+fn descendant_with_class(widget: &gtk::Widget, class: &str) -> Option<gtk::Widget> {
+    if widget.has_css_class(class) {
+        return Some(widget.clone());
+    }
+    let mut child = widget.first_child();
+    while let Some(widget) = child {
+        if let Some(found) = descendant_with_class(&widget, class) {
+            return Some(found);
+        }
+        child = widget.next_sibling();
+    }
+    None
 }
 
 fn widget_or_ancestor_has_class(widget: &gtk::Widget, class: &str) -> bool {

@@ -4,7 +4,19 @@
 
 Strata is an experimental, keyboard-first file manager for Linux. It is designed primarily for Omarchy while remaining portable to other modern Linux environments.
 
-![Strata showing Miller-column navigation, the places sidebar, and a source-code preview](docs/assets/strata-screenshot.png)
+## Browser modes
+
+### List
+
+![Strata List mode showing Miller-column navigation, the places sidebar, and a source-code preview](docs/assets/strata-screenshot.png)
+
+### Explorer
+
+![Strata Explorer mode showing a detailed, sortable file listing](docs/assets/strata-explorer.png)
+
+### Grid
+
+![Strata Grid mode showing files and folders as icon tiles](docs/assets/strata-grid.png)
 
 ## Vision
 
@@ -14,7 +26,7 @@ Strata is an experimental, keyboard-first file manager for Linux. It is designed
 - Rich file previews
 - Collapsible sidebar
 - Compact and airy density modes
-- List and grid views
+- List, Explorer, and Grid views
 - Omarchy and system theming
 - Complete keyboard navigation
 

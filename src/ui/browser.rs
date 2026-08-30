@@ -409,6 +409,7 @@ impl BrowserView {
 
     pub fn rename_is_active(&self) -> bool {
         self.state.active_rename.borrow().is_some()
+            || self.state.mode_views.borrow().rename_is_active()
     }
 
     pub fn new_folder_is_active(&self) -> bool {
@@ -1935,12 +1936,15 @@ impl ViewState {
     fn begin_rename(self: &Rc<Self>) -> bool {
         self.cancel_new_folder();
         self.sync_mode_selection();
-        if self.mode_views.borrow().mode() != BrowserMode::Columns {
-            return self.begin_rename_dialog();
-        }
         let Some((depth, source_position, entry)) = self.browser.rename_item() else {
             return false;
         };
+        if self.mode_views.borrow().mode() != BrowserMode::Columns {
+            return self
+                .mode_views
+                .borrow()
+                .begin_rename(depth, source_position, &entry);
+        }
         self.cancel_rename();
         let columns = self.columns.borrow();
         let Some(column) = columns.get(depth) else {
@@ -1986,70 +1990,10 @@ impl ViewState {
         true
     }
 
-    fn begin_rename_dialog(self: &Rc<Self>) -> bool {
-        let Some((_, _, entry)) = self.browser.rename_item() else {
-            return false;
-        };
-        let Some(parent) = self.overlay.root().and_downcast::<gtk::Window>() else {
-            return false;
-        };
-        let dialog = gtk::Window::builder()
-            .title("Rename")
-            .transient_for(&parent)
-            .modal(true)
-            .resizable(false)
-            .default_width(420)
-            .build();
-        let content = gtk::Box::new(gtk::Orientation::Vertical, 12);
-        content.add_css_class("delete-confirmation");
-        content.set_margin_top(16);
-        content.set_margin_bottom(16);
-        content.set_margin_start(18);
-        content.set_margin_end(18);
-        let title = gtk::Label::new(Some("Rename item"));
-        title.add_css_class("delete-confirmation-title");
-        title.set_xalign(0.0);
-        let field = gtk::Entry::new();
-        field.add_css_class("inline-rename");
-        field.set_text(&entry.display_name);
-        field.select_region(0, rename_stem_end(&entry.display_name));
-        let actions = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-        actions.set_halign(gtk::Align::End);
-        let cancel = gtk::Button::with_label("Cancel");
-        cancel.add_css_class("delete-confirmation-cancel");
-        let rename = gtk::Button::with_label("Rename");
-        rename.add_css_class("delete-confirmation-delete");
-        actions.append(&cancel);
-        actions.append(&rename);
-        content.append(&title);
-        content.append(&field);
-        content.append(&actions);
-        dialog.set_child(Some(&content));
-        let cancelled = dialog.clone();
-        cancel.connect_clicked(move |_| cancelled.close());
-        let submit = Rc::new({
-            let weak = Rc::downgrade(self);
-            let dialog = dialog.clone();
-            let field = field.clone();
-            move || {
-                if let Some(state) = weak.upgrade() {
-                    let name = field.text().to_string();
-                    if !name.is_empty() && name != entry.display_name {
-                        state.browser.rename(entry.clone(), name);
-                    }
-                }
-                dialog.close();
-            }
-        });
-        let submit_button = submit.clone();
-        rename.connect_clicked(move |_| submit_button());
-        field.connect_activate(move |_| submit());
-        dialog.present();
-        field.grab_focus();
-        true
-    }
-
     fn cancel_rename(&self) -> bool {
+        if self.mode_views.borrow().cancel_rename() {
+            return true;
+        }
         let Some(rename) = self.active_rename.take() else {
             return false;
         };
@@ -4717,7 +4661,7 @@ fn set_cut_path_style(row: &gtk::Box, cut: bool) {
     }
 }
 
-fn rename_stem_end(name: &str) -> i32 {
+pub(super) fn rename_stem_end(name: &str) -> i32 {
     let end = name
         .rfind('.')
         .filter(|position| *position > 0)
