@@ -71,6 +71,15 @@ impl PreviewDrawer {
         title.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
         title.set_hexpand(true);
         title.set_xalign(0.0);
+        let open = gtk::Button::builder()
+            .tooltip_text("Open in default application")
+            .valign(gtk::Align::Center)
+            .build();
+        open.set_child(Some(&crate::assets::primary_icon(
+            crate::assets::icons::EXTERNAL_LINK,
+            16,
+        )));
+        open.add_css_class("preview-header-action");
         let close = gtk::Button::builder()
             .tooltip_text("Close preview (Space)")
             .valign(gtk::Align::Center)
@@ -80,8 +89,10 @@ impl PreviewDrawer {
             16,
         )));
         close.add_css_class("preview-close");
+        close.add_css_class("preview-header-action");
         header.append(&icon);
         header.append(&title);
+        header.append(&open);
         header.append(&close);
         pane.append(&header);
 
@@ -128,6 +139,28 @@ impl PreviewDrawer {
             last_split_width: Cell::new(0),
             animating: Cell::new(false),
             animation_generation: Rc::new(Cell::new(0)),
+        });
+        let weak = Rc::downgrade(&state);
+        open.connect_clicked(move |_| {
+            let Some(state) = weak.upgrade() else {
+                return;
+            };
+            let location = state
+                .current
+                .borrow()
+                .as_ref()
+                .map(|entry| entry.location.clone());
+            if let Some(location) = location {
+                if let Some(stream) = state
+                    .media
+                    .borrow()
+                    .as_ref()
+                    .and_then(gtk::Video::media_stream)
+                {
+                    stream.set_playing(false);
+                }
+                super::browser::open_location(&location, &state.pane);
+            }
         });
         let weak = Rc::downgrade(&state);
         close.connect_clicked(move |_| {
@@ -407,6 +440,13 @@ impl PreviewState {
                 video.set_vexpand(true);
                 self.media.replace(Some(video.clone()));
                 self.content.append(&video);
+                let notice = gtk::Label::new(Some(
+                    "Preview limited to the first 30 seconds. Open the file to play the full video.",
+                ));
+                notice.add_css_class("preview-note");
+                notice.set_wrap(true);
+                notice.set_xalign(0.0);
+                self.content.append(&notice);
             }
             PreviewContent::Image | PreviewContent::Media => {
                 self.show_message(
