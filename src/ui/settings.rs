@@ -233,18 +233,12 @@ fn about_page() -> gtk::Widget {
     identity.add_css_class("about-identity");
     identity.set_halign(gtk::Align::Center);
 
-    let mark = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    mark.add_css_class("about-mark");
-    mark.set_halign(gtk::Align::Center);
-    mark.append(&crate::assets::primary_icon(icons::INFO, 28));
-
     let name = gtk::Label::new(Some("Strata"));
     name.add_css_class("about-name");
     let description = gtk::Label::new(Some(crate::build_info::DESCRIPTION));
     description.add_css_class("about-description");
     description.set_justify(gtk::Justification::Center);
     description.set_wrap(true);
-    identity.append(&mark);
     identity.append(&name);
     identity.append(&description);
     content.append(&identity);

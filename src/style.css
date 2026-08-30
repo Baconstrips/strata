@@ -642,14 +642,6 @@ headerbar menubutton.header-action > button:focus-visible image {
   margin: 8px 24px 14px;
 }
 
-.about-mark {
-  background: alpha(@theme_highlight, 0.72);
-  border: 1px solid alpha(@theme_accent, 0.48);
-  border-radius: 999px;
-  margin-bottom: 3px;
-  padding: 12px;
-}
-
 .about-name {
   color: @theme_text;
   font-size: 1.55em;
