@@ -77,6 +77,24 @@ fn quick_preview_is_offered_only_for_supported_files() {
 }
 
 #[test]
+fn local_file_drops_prefer_move_while_external_drops_prefer_copy() {
+    let both = gtk::gdk::DragAction::COPY | gtk::gdk::DragAction::MOVE;
+
+    assert_eq!(
+        preferred_file_drop_action(both, true),
+        gtk::gdk::DragAction::MOVE
+    );
+    assert_eq!(
+        preferred_file_drop_action(both, false),
+        gtk::gdk::DragAction::COPY
+    );
+    assert_eq!(
+        preferred_file_drop_action(gtk::gdk::DragAction::MOVE, false),
+        gtk::gdk::DragAction::MOVE
+    );
+}
+
+#[test]
 fn multi_selection_summary_lists_at_most_three_names() {
     let entry = |name: &str| FileEntry {
         location: Location::local(format!("/fixture/{name}")),

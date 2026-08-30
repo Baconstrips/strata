@@ -2589,6 +2589,8 @@ impl ViewState {
                 gtk::gdk::FileList::static_type(),
                 gtk::gdk::DragAction::COPY | gtk::gdk::DragAction::MOVE,
             );
+            drop.connect_enter(|target, _, _| file_drop_action(target));
+            drop.connect_motion(|target, _, _| file_drop_action(target));
             let weak_state_for_accept = weak_state.clone();
             let accepted_item = item.clone();
             let source_for_accept = source_for_hover.clone();
@@ -4199,6 +4201,8 @@ fn install_directory_drop_target(
         gtk::gdk::FileList::static_type(),
         gtk::gdk::DragAction::COPY | gtk::gdk::DragAction::MOVE,
     );
+    drop.connect_enter(|target, _, _| file_drop_action(target));
+    drop.connect_motion(|target, _, _| file_drop_action(target));
     let weak = Rc::downgrade(state);
     drop.connect_drop(move |target, value, _, _| {
         let Some(state) = weak.upgrade() else {
@@ -4239,12 +4243,28 @@ fn transfer_dropped_files(
     if sources.is_empty() {
         return false;
     }
-    let move_sources = target
-        .current_drop()
-        .and_then(|drop| drop.drag())
-        .is_some_and(|drag| drag.selected_action() == gtk::gdk::DragAction::MOVE);
+    let move_sources = file_drop_action(target) == gtk::gdk::DragAction::MOVE;
     state.start_transfer(destination, sources, move_sources);
     true
+}
+
+fn file_drop_action(target: &gtk::DropTarget) -> gtk::gdk::DragAction {
+    let Some(drop) = target.current_drop() else {
+        return gtk::gdk::DragAction::empty();
+    };
+    preferred_file_drop_action(drop.actions(), drop.drag().is_some())
+}
+
+fn preferred_file_drop_action(actions: gtk::gdk::DragAction, local: bool) -> gtk::gdk::DragAction {
+    if actions.contains(gtk::gdk::DragAction::MOVE)
+        && (local || !actions.contains(gtk::gdk::DragAction::COPY))
+    {
+        gtk::gdk::DragAction::MOVE
+    } else if actions.contains(gtk::gdk::DragAction::COPY) {
+        gtk::gdk::DragAction::COPY
+    } else {
+        gtk::gdk::DragAction::empty()
+    }
 }
 
 fn location_for_gio_file(file: &gio::File) -> Location {
