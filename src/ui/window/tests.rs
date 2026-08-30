@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use super::{reorder_places, should_show_standard_place};
+use super::{parse_pinned_places, reorder_places, should_show_standard_place};
 
 #[test]
 fn places_can_move_before_an_earlier_item() {
@@ -35,6 +35,24 @@ fn invalid_place_reorders_leave_the_order_unchanged() {
     assert!(!reorder_places(&mut places, "desktop", "missing", false));
     assert!(!reorder_places(&mut places, "desktop", "desktop", false));
     assert_eq!(places, original);
+}
+
+#[test]
+fn gtk_bookmarks_become_native_and_remote_pinned_places() {
+    let places = parse_pinned_places(
+        "file:///home/user/Projects Work\nsftp://host.example/home/user Remote\n",
+    );
+
+    assert_eq!(
+        places[0].0.native_path(),
+        Some(Path::new("/home/user/Projects"))
+    );
+    assert_eq!(places[0].1, "Work");
+    assert_eq!(
+        places[1].0.uri_value(),
+        Some("sftp://host.example/home/user")
+    );
+    assert_eq!(places[1].1, "Remote");
 }
 
 #[test]

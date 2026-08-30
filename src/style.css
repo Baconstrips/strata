@@ -1774,6 +1774,73 @@ menubutton.column-header-action > button:focus-visible image {
   min-width: 220px;
 }
 
+.grid-thumbnail-popover contents {
+  background: @theme_surface;
+  border: 1px solid alpha(@theme_accent, 0.28);
+  border-radius: 7px;
+  box-shadow: 0 8px 28px alpha(@theme_bg, 0.72);
+  color: @theme_text;
+  padding: 14px;
+}
+
+.grid-thumbnail-title {
+  color: @theme_text;
+  font-weight: 700;
+}
+
+.grid-thumbnail-value,
+.grid-thumbnail-extremes {
+  color: @theme_dim_text;
+}
+
+.grid-thumbnail-value {
+  font-family: "JetBrains Mono";
+  font-size: 0.9em;
+}
+
+.grid-thumbnail-extremes {
+  font-size: 0.8em;
+}
+
+.grid-thumbnail-scale trough {
+  background: alpha(@theme_muted, 0.72);
+  border: 1px solid alpha(@theme_border, 0.68);
+  border-radius: 999px;
+  min-height: 5px;
+}
+
+.grid-thumbnail-scale highlight {
+  background: @theme_accent;
+  border-radius: 999px;
+}
+
+.grid-thumbnail-scale slider {
+  background: @theme_surface;
+  border: 2px solid @theme_accent;
+  border-radius: 999px;
+  box-shadow: 0 2px 7px alpha(@theme_bg, 0.7);
+  min-height: 14px;
+  min-width: 14px;
+}
+
+.grid-thumbnail-scale:hover slider,
+.grid-thumbnail-scale:active slider {
+  background: @theme_highlight;
+  border-color: @theme_accent;
+}
+
+.grid-thumbnail-scale:focus-visible slider,
+menubutton.grid-thumbnail-menu > button:focus-visible {
+  outline: 2px solid @theme_accent;
+  outline-offset: 2px;
+}
+
+.grid-thumbnail-scale:disabled trough,
+.grid-thumbnail-scale:disabled highlight,
+.grid-thumbnail-scale:disabled slider {
+  opacity: 0.45;
+}
+
 .mode-pane-header {
   background: @theme_surface;
   border-bottom: 1px solid alpha(@theme_border, 0.6);

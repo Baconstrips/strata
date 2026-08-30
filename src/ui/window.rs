@@ -122,6 +122,12 @@ pub fn present_location(application: &gtk::Application, location: Option<PathBuf
     content.set_position(SIDEBAR_WIDTH);
     content.set_vexpand(true);
     let sidebar = build_sidebar(browser.clone());
+    let weak_sidebar = Rc::downgrade(&sidebar.state);
+    browser.set_pin_handler(Rc::new(move |location, name| {
+        if let Some(sidebar) = weak_sidebar.upgrade() {
+            sidebar.pin_location(location, name);
+        }
+    }));
     sidebar.widget.set_size_request(MIN_SIDEBAR_WIDTH, -1);
     content.set_start_child(Some(&sidebar.widget));
     content.set_end_child(Some(&browser.widget()));
@@ -619,6 +625,7 @@ struct SidebarState {
     browser: Rc<Browser>,
     volume_monitor: gio::VolumeMonitor,
     place_order: RefCell<Vec<&'static str>>,
+    pinned_places: RefCell<Vec<(Location, String)>>,
     place_rows: RefCell<Vec<(Location, gtk::Button)>>,
 }
 
@@ -660,6 +667,14 @@ impl SidebarState {
             }
         }
 
+        let pinned = self.pinned_places.borrow().clone();
+        if !pinned.is_empty() {
+            self.append_separator();
+            for (location, name) in pinned {
+                self.append_place(crate::assets::icons::FOLDER, &name, location);
+            }
+        }
+
         let volumes = self.volume_monitor.volumes();
         let mounts: Vec<_> = self
             .volume_monitor
@@ -685,6 +700,20 @@ impl SidebarState {
             }
         }
         self.sync_active_place();
+    }
+
+    fn pin_location(self: &Rc<Self>, location: Location, name: String) {
+        if self
+            .pinned_places
+            .borrow()
+            .iter()
+            .any(|(pinned, _)| pinned == &location)
+        {
+            return;
+        }
+        self.pinned_places.borrow_mut().push((location, name));
+        save_pinned_places(&self.pinned_places.borrow());
+        self.rebuild();
     }
 
     fn sync_active_place(&self) {
@@ -1053,6 +1082,7 @@ fn build_sidebar(view: BrowserView) -> SidebarView {
             "pictures",
             "videos",
         ]),
+        pinned_places: RefCell::new(load_pinned_places()),
         place_rows: RefCell::new(Vec::new()),
     });
 
@@ -1107,6 +1137,63 @@ fn build_sidebar(view: BrowserView) -> SidebarView {
         state,
         handlers: RefCell::new(handlers),
     }
+}
+
+fn pinned_places_path() -> PathBuf {
+    glib::user_config_dir().join("gtk-3.0/bookmarks")
+}
+
+fn load_pinned_places() -> Vec<(Location, String)> {
+    std::fs::read_to_string(pinned_places_path())
+        .map(|contents| parse_pinned_places(&contents))
+        .unwrap_or_default()
+}
+
+fn parse_pinned_places(contents: &str) -> Vec<(Location, String)> {
+    contents
+        .lines()
+        .filter_map(|line| {
+            let (uri, label) = line
+                .split_once(' ')
+                .map_or((line, None), |(uri, label)| (uri, Some(label)));
+            if uri.is_empty() {
+                return None;
+            }
+            let file = gio::File::for_uri(uri);
+            let location = file
+                .path()
+                .map(Location::local)
+                .unwrap_or_else(|| Location::uri(uri));
+            let name = label
+                .filter(|label| !label.is_empty())
+                .map(str::to_owned)
+                .unwrap_or_else(|| location.display_name());
+            Some((location, name))
+        })
+        .collect()
+}
+
+fn save_pinned_places(places: &[(Location, String)]) {
+    let path = pinned_places_path();
+    let Some(parent) = path.parent() else {
+        return;
+    };
+    if std::fs::create_dir_all(parent).is_err() {
+        return;
+    }
+    let mut contents = String::new();
+    for (location, name) in places {
+        let uri = location
+            .native_path()
+            .map(gio::File::for_path)
+            .map(|file| file.uri().to_string())
+            .or_else(|| location.uri_value().map(str::to_owned));
+        if let Some(uri) = uri {
+            let label = name.replace(['\n', '\r'], " ");
+            contents.push_str(&format!("{uri} {label}\n"));
+        }
+    }
+    let _result = std::fs::write(path, contents);
 }
 
 fn home_directory() -> PathBuf {

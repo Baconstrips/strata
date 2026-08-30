@@ -72,6 +72,22 @@ install -Dm755 strata-<version>-<target>/strata ~/.local/bin/strata
 
 Ensure `~/.local/bin` is on `PATH`, then run `strata`. Image thumbnails work without `ffmpegthumbnailer`; when that optional program is unavailable, video files fall back to their video icon.
 
+#### Optional RAW photo thumbnails
+
+Strata recognizes common camera RAW formats, including DNG, CR2/CR3, NEF, ARW, RAF, ORF, RW2, PEF, and X3F. RAW decoding is provided by tools already installed on the host rather than bundled into Strata. It tries, in order:
+
+1. an installed GDK Pixbuf loader;
+2. ImageMagick (`magick` or `convert`); and
+3. the LibRaw-compatible `dcraw_emu` or `dcraw` thumbnail extractor.
+
+On Arch or Omarchy, the recommended setup is:
+
+```bash
+sudo pacman -S --needed imagemagick libraw
+```
+
+Available formats depend on how those host packages were built and on whether a particular camera model is supported. Unsupported or malformed RAW files continue to display the normal image icon.
+
 ### Desktop integration
 
 Create a per-user desktop entry so launchers and `xdg-open` can discover Strata:

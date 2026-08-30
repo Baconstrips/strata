@@ -19,6 +19,9 @@ use crate::{
 };
 
 const EXPLORER_COLUMN_WIDTHS: [i32; 4] = [600, 90, 120, 150];
+const DEFAULT_GRID_THUMBNAIL_SIZE: i32 = 64;
+const MIN_GRID_THUMBNAIL_SIZE: i32 = 64;
+const MAX_GRID_THUMBNAIL_SIZE: i32 = 256;
 
 #[derive(Clone)]
 struct ExplorerColumnLayout {
@@ -93,6 +96,7 @@ pub struct ModeViews {
     active_rename: Rc<RefCell<Option<ActiveModeRename>>>,
     mode: BrowserMode,
     density: BrowserDensity,
+    grid_thumbnail_size: Rc<Cell<i32>>,
 }
 
 impl ModeViews {
@@ -140,6 +144,7 @@ impl ModeViews {
             active_rename: Rc::new(RefCell::new(None)),
             mode: BrowserMode::Columns,
             density: BrowserDensity::Compact,
+            grid_thumbnail_size: Rc::new(Cell::new(DEFAULT_GRID_THUMBNAIL_SIZE)),
         }
     }
 
@@ -324,7 +329,10 @@ impl ModeViews {
                     self.single_click_previews.clone(),
                     self.transfer_handler.clone(),
                     self.cut_locations.clone(),
-                    self.context_state.borrow().clone(),
+                    GridOptions {
+                        peek_state: self.context_state.borrow().clone(),
+                        thumbnail_size: self.grid_thumbnail_size.clone(),
+                    },
                     *depth,
                     &location.display_name(),
                 );
@@ -512,7 +520,10 @@ impl ModeViews {
             self.single_click_previews.clone(),
             self.transfer_handler.clone(),
             self.cut_locations.clone(),
-            self.context_state.borrow().clone(),
+            GridOptions {
+                peek_state: self.context_state.borrow().clone(),
+                thumbnail_size: self.grid_thumbnail_size.clone(),
+            },
             depth,
             &snapshot.location.display_name(),
         );
@@ -546,17 +557,73 @@ impl ModeViews {
     }
 }
 
+#[derive(Clone)]
+struct GridOptions {
+    peek_state: Option<Weak<super::browser::ViewState>>,
+    thumbnail_size: Rc<Cell<i32>>,
+}
+
 struct GridControls {
     leading: gtk::Box,
     actions: gtk::Box,
     filter_entry: gtk::Entry,
     filter_revealer: gtk::Revealer,
+    thumbnail_scale: gtk::Scale,
+    thumbnail_value: gtk::Label,
 }
 
-fn grid_controls(browser: &Rc<Browser>, depth: usize) -> GridControls {
+fn grid_controls(browser: &Rc<Browser>, depth: usize, thumbnail_size: i32) -> GridControls {
     let leading = explorer_navigation(browser);
     let actions = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     actions.add_css_class("grid-header-actions");
+
+    let thumbnail_popover = gtk::Popover::new();
+    thumbnail_popover.set_has_arrow(false);
+    thumbnail_popover.add_css_class("grid-thumbnail-popover");
+    let thumbnail_content = gtk::Box::new(gtk::Orientation::Vertical, 10);
+    let thumbnail_heading = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+    let thumbnail_title = gtk::Label::new(Some("Thumbnail size"));
+    thumbnail_title.add_css_class("grid-thumbnail-title");
+    thumbnail_title.set_xalign(0.0);
+    thumbnail_title.set_hexpand(true);
+    let thumbnail_value = gtk::Label::new(Some(&format!("{thumbnail_size} px")));
+    thumbnail_value.add_css_class("grid-thumbnail-value");
+    thumbnail_heading.append(&thumbnail_title);
+    thumbnail_heading.append(&thumbnail_value);
+    let thumbnail_scale = gtk::Scale::with_range(
+        gtk::Orientation::Horizontal,
+        f64::from(MIN_GRID_THUMBNAIL_SIZE),
+        f64::from(MAX_GRID_THUMBNAIL_SIZE),
+        16.0,
+    );
+    thumbnail_scale.add_css_class("grid-thumbnail-scale");
+    thumbnail_scale.set_draw_value(false);
+    thumbnail_scale.set_value(f64::from(thumbnail_size));
+    thumbnail_scale.set_size_request(220, -1);
+    let thumbnail_extremes = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    thumbnail_extremes.add_css_class("grid-thumbnail-extremes");
+    let small = gtk::Label::new(Some("Small"));
+    small.set_xalign(0.0);
+    small.set_hexpand(true);
+    let large = gtk::Label::new(Some("Large"));
+    large.set_xalign(1.0);
+    thumbnail_extremes.append(&small);
+    thumbnail_extremes.append(&large);
+    thumbnail_content.append(&thumbnail_heading);
+    thumbnail_content.append(&thumbnail_scale);
+    thumbnail_content.append(&thumbnail_extremes);
+    thumbnail_popover.set_child(Some(&thumbnail_content));
+    let thumbnail_menu = gtk::MenuButton::builder()
+        .tooltip_text("Thumbnail size")
+        .popover(&thumbnail_popover)
+        .build();
+    thumbnail_menu.add_css_class("column-header-action");
+    thumbnail_menu.add_css_class("grid-thumbnail-menu");
+    thumbnail_menu.set_child(Some(&crate::assets::text_icon(
+        crate::assets::icons::PICTURES,
+        16,
+    )));
+    actions.append(&thumbnail_menu);
     actions.append(&super::browser::column_sort_direction_toggle(
         browser, depth,
     ));
@@ -603,6 +670,8 @@ fn grid_controls(browser: &Rc<Browser>, depth: usize) -> GridControls {
         actions,
         filter_entry,
         filter_revealer,
+        thumbnail_scale,
+        thumbnail_value,
     }
 }
 
@@ -611,11 +680,12 @@ fn build_grid_pane(
     single_click_previews: Rc<Cell<bool>>,
     transfer_handler: TransferHandlerSlot,
     cut_locations: Rc<RefCell<Vec<Location>>>,
-    peek_state: Option<Weak<super::browser::ViewState>>,
+    options: GridOptions,
     depth: usize,
     title: &str,
 ) -> Pane {
-    let controls = grid_controls(&browser, depth);
+    let controls = grid_controls(&browser, depth, options.thumbnail_size.get());
+    let thumbnail_size = options.thumbnail_size;
     let (pane, content, model, stack, status, spinner) = pane_base(
         title,
         "grid-pane",
@@ -649,7 +719,7 @@ fn build_grid_pane(
     let source_for_setup = model.clone();
     let filtered_for_setup = filtered_model.clone();
     let transfers_for_setup = transfer_handler.clone();
-    let peek_for_setup = peek_state.clone();
+    let peek_for_setup = options.peek_state;
     factory.connect_setup(move |_, item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
@@ -717,6 +787,7 @@ fn build_grid_pane(
     let source_for_bind = model.clone();
     let filtered_for_bind = filtered_model.clone();
     let cuts_for_bind = cut_locations.clone();
+    let thumbnail_size_for_bind = thumbnail_size.clone();
     factory.connect_bind(move |_, item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
@@ -750,7 +821,7 @@ fn build_grid_pane(
                 &entry,
                 super::browser::entry_icon(&entry),
                 26,
-                64,
+                thumbnail_size_for_bind.get(),
             );
             icon.set_opacity(if entry.is_directory() { 1.0 } else { 0.72 });
         }
@@ -761,6 +832,37 @@ fn build_grid_pane(
     view.set_max_columns(20);
     view.set_enable_rubberband(false);
     view.set_single_click_activate(false);
+
+    let pending_thumbnail_resize = Rc::new(RefCell::new(None::<glib::SourceId>));
+    let weak_browser_for_size = Rc::downgrade(&browser);
+    let model_for_size = model.clone();
+    let filtered_for_size = filtered_model.clone();
+    let bound_for_size = bound_items.clone();
+    let thumbnail_size_for_change = thumbnail_size.clone();
+    let value_for_change = controls.thumbnail_value.clone();
+    controls
+        .thumbnail_scale
+        .connect_value_changed(move |scale| {
+            let size = scale.value().round() as i32;
+            value_for_change.set_label(&format!("{size} px"));
+            if let Some(pending) = pending_thumbnail_resize.take() {
+                pending.remove();
+            }
+            let pending_for_timeout = pending_thumbnail_resize.clone();
+            let browser = weak_browser_for_size.clone();
+            let model = model_for_size.clone();
+            let filtered = filtered_for_size.clone();
+            let bound = bound_for_size.clone();
+            let size_state = thumbnail_size_for_change.clone();
+            let source =
+                glib::timeout_add_local_once(std::time::Duration::from_millis(100), move || {
+                    pending_for_timeout.take();
+                    size_state.set(size);
+                    refresh_grid_thumbnail_size(&browser, depth, &model, &filtered, &bound, size);
+                });
+            pending_thumbnail_resize.replace(Some(source));
+        });
+
     let weak_browser = Rc::downgrade(&browser);
     let source_for_activation = model.clone();
     let filtered_for_activation = filtered_model.clone();
@@ -809,6 +911,52 @@ fn build_grid_pane(
         bound_items,
         filter_entry: Some(controls.filter_entry),
     }
+}
+
+fn refresh_grid_thumbnail_size(
+    browser: &Weak<Browser>,
+    depth: usize,
+    model: &gtk::StringList,
+    filtered_model: &gtk::FilterListModel,
+    bound_items: &RefCell<Vec<BoundModeItem>>,
+    size: i32,
+) {
+    let Some(browser) = browser.upgrade() else {
+        return;
+    };
+    bound_items.borrow().iter().for_each(|bound| {
+        let Some(item) = bound.item.upgrade() else {
+            return;
+        };
+        let Some(card) = bound.widget.upgrade().and_downcast::<gtk::Box>() else {
+            return;
+        };
+        let Some(icon) = card
+            .first_child()
+            .and_downcast::<gtk::CenterBox>()
+            .and_then(|centered| centered.center_widget())
+            .and_downcast::<gtk::Box>()
+            .and_then(|content| content.first_child())
+            .and_downcast::<gtk::Image>()
+        else {
+            return;
+        };
+        let Some(position) = source_position_for_view(model, Some(filtered_model), item.position())
+        else {
+            return;
+        };
+        let Some(entry) = browser.entry_at(depth, position) else {
+            return;
+        };
+        super::thumbnail::set_thumbnail_or_icon(
+            &icon,
+            &entry,
+            super::browser::entry_icon(&entry),
+            26,
+            size,
+        );
+        icon.set_opacity(if entry.is_directory() { 1.0 } else { 0.72 });
+    });
 }
 
 fn configure_grid_density(pane: &Pane, density: BrowserDensity) {

@@ -190,6 +190,8 @@ impl Default for PeekBehavior {
     }
 }
 
+type PinHandler = Rc<dyn Fn(Location, String)>;
+
 pub(super) struct ViewState {
     overlay: gtk::Overlay,
     location_stack: gtk::Stack,
@@ -213,6 +215,7 @@ pub(super) struct ViewState {
     active_rename: RefCell<Option<ActiveRename>>,
     active_new_folder: RefCell<Option<ActiveNewFolder>>,
     delete_progress: RefCell<Option<DeleteProgressView>>,
+    pin_handler: RefCell<Option<PinHandler>>,
     browser: Rc<Browser>,
 }
 
@@ -319,6 +322,7 @@ impl BrowserView {
             active_rename: RefCell::new(None),
             active_new_folder: RefCell::new(None),
             delete_progress: RefCell::new(None),
+            pin_handler: RefCell::new(None),
             browser,
         });
 
@@ -389,6 +393,10 @@ impl BrowserView {
 
     pub fn browser(&self) -> Rc<Browser> {
         self.state.browser.clone()
+    }
+
+    pub(super) fn set_pin_handler(&self, handler: PinHandler) {
+        self.state.pin_handler.replace(Some(handler));
     }
 
     pub fn set_operation_provider(&self, provider: Rc<dyn OperationProvider>) {
@@ -3720,7 +3728,6 @@ pub(super) fn install_item_context_menu(
     let restore = item_context_option(crate::assets::icons::FOLDER, "Restore", "");
     restore.set_visible(in_trash);
     let pin = item_context_option(crate::assets::icons::PIN, "Pin to sidebar", "P");
-    pin.set_tooltip_text(Some("Pinned locations are planned"));
     let copy_path = item_context_option(crate::assets::icons::COPY, "Copy path", "Y");
     let move_to = item_context_option(crate::assets::icons::FOLDER, "Move to…", "");
     let copy_to = item_context_option(crate::assets::icons::COPY, "Copy to…", "");
@@ -3815,10 +3822,21 @@ pub(super) fn install_item_context_menu(
             state.browser.preview(depth, position);
         }
     });
+    let weak = Rc::downgrade(state);
+    let pin_target = target.clone();
     let pin_popover = popover.downgrade();
     pin.connect_clicked(move |_| {
         if let Some(popover) = pin_popover.upgrade() {
             popover.popdown();
+        }
+        let Some((_, entry)) = pin_target.borrow().clone() else {
+            return;
+        };
+        if let Some(state) = weak.upgrade()
+            && entry.is_directory()
+            && let Some(handler) = state.pin_handler.borrow().as_ref()
+        {
+            handler(entry.location, entry.display_name);
         }
     });
     let weak = Rc::downgrade(state);
@@ -3927,6 +3945,7 @@ pub(super) fn install_item_context_menu(
         target.replace(Some((resolved_position, entry.clone())));
         let entries = state.browser.selected_entries();
         preview.set_visible(entry_supports_quick_preview(&entry));
+        pin.set_sensitive(entry.is_directory() && !is_trash_location(&entry.location));
         if entries.len() > 1 {
             heading.set_text(&format!("{} items selected", entries.len()));
             summary.set_text(&selected_items_summary(&entries));
@@ -4706,9 +4725,12 @@ fn icon_for_name(name: &str) -> &'static str {
         .map(|(_, extension)| extension.to_ascii_lowercase());
     match extension.as_deref() {
         Some("sh" | "bash" | "zsh" | "fish") => crate::assets::icons::TERMINAL,
-        Some("png" | "jpg" | "jpeg" | "gif" | "webp" | "svg" | "bmp" | "avif") => {
-            crate::assets::icons::PICTURES
-        }
+        Some(
+            "png" | "jpg" | "jpeg" | "gif" | "webp" | "svg" | "bmp" | "avif" | "tif" | "tiff"
+            | "3fr" | "arw" | "cr2" | "cr3" | "dcr" | "dng" | "erf" | "kdc" | "mef" | "mos" | "mrw"
+            | "nef" | "nrw" | "orf" | "pef" | "raf" | "raw" | "rw2" | "rwl" | "sr2" | "srf" | "srw"
+            | "x3f",
+        ) => crate::assets::icons::PICTURES,
         Some("mp4" | "mkv" | "webm" | "mov" | "avi" | "m4v") => crate::assets::icons::VIDEOS,
         Some("zip" | "tar" | "gz" | "bz2" | "xz" | "7z" | "rar" | "zst") => {
             crate::assets::icons::FILE_ARCHIVE
