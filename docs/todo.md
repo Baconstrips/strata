@@ -127,24 +127,31 @@ Legend: **P0** blocks the milestone, **P1** is required for its exit criteria, *
 
 - [x] **P0** Open files with the default application
 - [ ] **P0** Add an Open With chooser
-- [ ] **P0** Create folder (`Ctrl+Shift+N`) and empty file
+- [x] **P0** Create folders from `Ctrl+Shift+N` and the folder background menu
+- [ ] **P0** Create an empty file
 - [x] **P0** Replace the selected row label with an inline rename input on `F2`, preserving the extension selection and showing validation feedback in place
 - [ ] **P1** Executable-file policy and confirmation
 
 ### Context menu (revisit after core actions exist)
 
-- [ ] **P1** Open a selection-aware file context menu from right-click and the keyboard menu key
-- [ ] **P1** Preserve an existing multi-selection when right-clicking one of its selected rows; otherwise select the clicked row
-- [ ] **P1** Group Open/Open With, Cut/Copy, Move To/Copy To, Rename, Trash/Delete, and Properties with visible shortcuts and separators
-- [ ] **P1** Disable or hide actions according to selection shape, destination writability, clipboard state, and provider capability
+- [x] **P1** Open a selection-aware file context menu from right-click
+- [ ] **P1** Open the selection-aware file context menu from the keyboard menu key
+- [x] **P1** Preserve an existing multi-selection when right-clicking one of its selected rows; otherwise select the clicked row
+- [x] **P1** Group the available Open, Preview, Cut, Rename, Trash, and Properties actions with visible shortcuts and separators
+- [ ] **P1** Add Open With, Copy, Move To, Copy To, and permanent Delete as their underlying actions become available
+- [x] **P1** Adapt context-menu actions to single and multiple selections and disable inapplicable preview and paste actions
+- [ ] **P1** Disable or hide actions according to destination writability, clipboard operation, and provider capability
+- [x] **P1** Add a folder background menu for New Folder, Paste, Select All, and Properties
+- [x] **P1** Add file and folder properties dialogs
 - [ ] **P2** Evaluate optional Compress, Email, LocalSend, and desktop share integrations without making them core dependencies
 
 ### Operation engine
 
 - [ ] **P0** Model queued operation lifecycle and final outcomes
 - [ ] **P0** Copy and move selected files between folders through the operation engine
-- [ ] **P0** Duplicate, trash, and permanently delete selected files
-- [ ] **P0** Bind `Delete` to a confirmed delete/trash action
+- [ ] **P0** Duplicate selected files
+- [x] **P0** Trash and permanently delete selected files
+- [x] **P0** Bind `Delete` and `Shift+Delete` to confirmed trash and permanent-delete actions
 - [ ] **P0** Progress reporting and cancellation
 - [ ] **P0** Conflict handling: skip, replace, rename, and apply-to-all
 - [ ] **P0** Partial-failure reporting and safe cancellation cleanup
@@ -156,7 +163,8 @@ Legend: **P0** blocks the milestone, **P1** is required for its exit criteria, *
 
 ### Desktop interoperability
 
-- [ ] **P0** Copy/cut selected files with `Ctrl+C` / `Ctrl+X` and paste into another folder with `Ctrl+V`
+- [ ] **P0** Copy/cut selected files with `Ctrl+C` / `Ctrl+X`
+- [x] **P0** Paste a GDK file-list clipboard into the active folder with `Ctrl+V` or the folder background menu
 - [ ] **P0** Use interoperable file-manager clipboard formats for external copy/cut/paste
 - [ ] **P0** Enable Cut/Copy based on selection and Paste based on clipboard contents and destination writability
 - [ ] **P0** Drag and drop between locations within Strata

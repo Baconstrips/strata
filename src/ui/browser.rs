@@ -701,7 +701,8 @@ impl ViewState {
 
         let actions = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         actions.add_css_class("delete-confirmation-actions");
-        actions.set_halign(gtk::Align::End);
+        let action_spacer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        action_spacer.set_hexpand(true);
         let cancel = gtk::Button::with_label("Cancel");
         cancel.add_css_class("delete-confirmation-cancel");
         let confirm_label = if permanent {
@@ -714,6 +715,7 @@ impl ViewState {
         confirm_content.append(&gtk::Label::new(Some(&confirm_label)));
         let confirm = gtk::Button::builder().child(&confirm_content).build();
         confirm.add_css_class("delete-confirmation-delete");
+        actions.append(&action_spacer);
         actions.append(&cancel);
         actions.append(&confirm);
         content.append(&actions);
