@@ -598,6 +598,25 @@ fn single_click_action_descends_into_directories() {
 }
 
 #[test]
+fn activating_an_open_list_item_does_not_reload_its_pane() {
+    let browser = Browser::new(Rc::new(FakeFileSource));
+    let events = Rc::new(RefCell::new(Vec::new()));
+    let observed = events.clone();
+    browser.observe(move |event| observed.borrow_mut().push(event));
+    browser.navigate(Location::local("/fixture"));
+    browser.preview(0, 0);
+    events.borrow_mut().clear();
+
+    browser.preview(0, 0);
+
+    assert!(!events.borrow().iter().any(|event| matches!(
+        event,
+        BrowserEvent::ColumnsTruncated { .. } | BrowserEvent::ColumnAdded { .. }
+    )));
+    assert_eq!(browser.active_depth(), Some(1));
+}
+
+#[test]
 fn explorer_activation_replaces_the_directory_instead_of_adding_a_column() {
     let browser = Browser::new(Rc::new(FakeFileSource));
     let events = Rc::new(RefCell::new(Vec::new()));

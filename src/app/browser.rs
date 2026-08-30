@@ -238,6 +238,9 @@ impl Browser {
     }
 
     pub fn descend(self: &Rc<Self>, parent_depth: usize, location: Location) {
+        if self.is_open_child(parent_depth, &location) {
+            return;
+        }
         self.close_peek();
         if let Err(error) = self.source.validate_location(&location) {
             self.emit(BrowserEvent::NavigationRejected {
@@ -837,10 +840,13 @@ impl Browser {
     }
 
     pub fn preview(self: &Rc<Self>, depth: usize, position: usize) {
-        self.select(depth, position);
         let Some(entry) = self.entry_at(depth, position) else {
             return;
         };
+        if entry.is_directory() && self.is_open_child(depth, &entry.location) {
+            return;
+        }
+        self.select(depth, position);
         if entry.is_directory() {
             self.descend(depth, entry.location);
         } else {
@@ -853,8 +859,22 @@ impl Browser {
     }
 
     pub fn activate(self: &Rc<Self>, depth: usize, position: usize) {
+        if self
+            .entry_at(depth, position)
+            .is_some_and(|entry| entry.is_directory() && self.is_open_child(depth, &entry.location))
+        {
+            return;
+        }
         self.select(depth, position);
         self.activate_focused();
+    }
+
+    fn is_open_child(&self, parent_depth: usize, location: &Location) -> bool {
+        parent_depth
+            .checked_add(1)
+            .and_then(|depth| self.location_at(depth))
+            .as_ref()
+            == Some(location)
     }
 
     /// Activates an item using conventional single-pane explorer navigation.
