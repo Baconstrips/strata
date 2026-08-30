@@ -454,13 +454,15 @@ impl ModeViews {
 }
 
 struct GridControls {
+    leading: gtk::Box,
     actions: gtk::Box,
     filter_entry: gtk::Entry,
     filter_revealer: gtk::Revealer,
 }
 
 fn grid_controls(browser: &Rc<Browser>, depth: usize) -> GridControls {
-    let actions = explorer_navigation(browser);
+    let leading = explorer_navigation(browser);
+    let actions = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     actions.add_css_class("grid-header-actions");
     actions.append(&super::browser::column_sort_direction_toggle(
         browser, depth,
@@ -504,6 +506,7 @@ fn grid_controls(browser: &Rc<Browser>, depth: usize) -> GridControls {
     });
     actions.append(&filter_button);
     GridControls {
+        leading,
         actions,
         filter_entry,
         filter_revealer,
@@ -520,8 +523,12 @@ fn build_grid_pane(
     title: &str,
 ) -> Pane {
     let controls = grid_controls(&browser, depth);
-    let (pane, content, model, stack, status, spinner) =
-        pane_base(title, "grid-pane", Some(controls.actions.clone().upcast()));
+    let (pane, content, model, stack, status, spinner) = pane_base(
+        title,
+        "grid-pane",
+        Some(controls.leading.clone().upcast()),
+        Some(controls.actions.clone().upcast()),
+    );
     content.append(&controls.filter_revealer);
     let filter_query = Rc::new(RefCell::new(String::new()));
     let query = filter_query.clone();
@@ -923,7 +930,7 @@ fn build_explorer_pane(
 ) -> Pane {
     let navigation = explorer_navigation(&browser);
     let (shell, content, model, stack, status, spinner) =
-        pane_base(title, "explorer-pane", Some(navigation.upcast()));
+        pane_base(title, "explorer-pane", Some(navigation.upcast()), None);
     let selection = gtk::MultiSelection::new(Some(model.clone()));
     let syncing_selection = Rc::new(Cell::new(false));
 
@@ -1084,6 +1091,7 @@ fn build_explorer_pane(
 fn pane_base(
     title: &str,
     class: &str,
+    header_leading: Option<gtk::Widget>,
     header_actions: Option<gtk::Widget>,
 ) -> (
     gtk::Box,
@@ -1104,6 +1112,9 @@ fn pane_base(
     heading.set_hexpand(true);
     let spinner = gtk::Spinner::new();
     spinner.start();
+    if let Some(leading) = header_leading {
+        header.append(&leading);
+    }
     header.append(&heading);
     header.append(&spinner);
     if let Some(actions) = header_actions {

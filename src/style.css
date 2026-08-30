@@ -1775,12 +1775,12 @@ menubutton.column-header-action > button:focus-visible image {
 }
 
 .mode-pane-header {
-  background: @theme_bg;
+  background: @theme_surface;
   border-bottom: 1px solid alpha(@theme_border, 0.6);
   color: @theme_accent;
   font-weight: 700;
   min-height: 36px;
-  padding: 4px 12px;
+  padding: 4px 12px 4px 6px;
 }
 
 .file-grid {
@@ -1922,7 +1922,7 @@ menubutton.column-header-action > button:focus-visible image {
 }
 
 .explorer-navigation {
-  margin-left: 4px;
+  margin-right: 4px;
 }
 
 .explorer-navigation-button {
