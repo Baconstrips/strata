@@ -2,6 +2,7 @@
 
 use std::{
     cell::RefCell,
+    collections::HashMap,
     ffi::CString,
     fs, io,
     io::Cursor,
@@ -54,6 +55,7 @@ pub mod icons {
 }
 
 const FONT_VERSION: &str = "2.304";
+const ICON_TEXTURE_CACHE_LIMIT: usize = 256;
 const JETBRAINS_MONO: &[u8] = include_bytes!("../data/fonts/JetBrainsMono[wght].ttf");
 
 struct PrimaryIcon {
@@ -68,6 +70,7 @@ thread_local! {
     static TEXT_ICONS: RefCell<Vec<PrimaryIcon>> = const { RefCell::new(Vec::new()) };
     static DANGER_ICON_COLOR: RefCell<String> = RefCell::new("#e5484d".to_owned());
     static DANGER_ICONS: RefCell<Vec<PrimaryIcon>> = const { RefCell::new(Vec::new()) };
+    static ICON_TEXTURES: RefCell<HashMap<(String, String), gdk::Texture>> = RefCell::new(HashMap::new());
 }
 
 pub fn prepare() -> Result<(), Box<dyn std::error::Error>> {
@@ -187,14 +190,19 @@ fn recolor_registered_icons(icons: &RefCell<Vec<PrimaryIcon>>, color: &str) {
 }
 
 fn apply_primary_icon(image: &gtk::Image, name: &str, color: &str) {
-    image.set_icon_name(Some(name));
-    let Some(texture) = primary_icon_texture(name, color) else {
-        return;
-    };
-    image.set_paintable(Some(&texture));
+    if let Some(texture) = primary_icon_texture(name, color) {
+        image.set_paintable(Some(&texture));
+    } else {
+        image.set_icon_name(Some(name));
+    }
 }
 
 fn primary_icon_texture(name: &str, color: &str) -> Option<gdk::Texture> {
+    let key = (name.to_owned(), color.to_owned());
+    if let Some(texture) = ICON_TEXTURES.with(|textures| textures.borrow().get(&key).cloned()) {
+        return Some(texture);
+    }
+
     let path = format!("/io/github/lgse/Strata/icons/scalable/actions/{name}.svg");
     let data = gio::resources_lookup_data(&path, gio::ResourceLookupFlags::NONE).ok()?;
     let source = std::str::from_utf8(data.as_ref()).ok()?;
@@ -207,7 +215,15 @@ fn primary_icon_texture(name: &str, color: &str) -> Option<gdk::Texture> {
         );
     }
     let pixbuf = gdk_pixbuf::Pixbuf::from_read(Cursor::new(source.into_bytes())).ok()?;
-    Some(gdk::Texture::for_pixbuf(&pixbuf))
+    let texture = gdk::Texture::for_pixbuf(&pixbuf);
+    ICON_TEXTURES.with(|textures| {
+        let mut textures = textures.borrow_mut();
+        if textures.len() >= ICON_TEXTURE_CACHE_LIMIT {
+            textures.clear();
+        }
+        textures.insert(key, texture.clone());
+    });
+    Some(texture)
 }
 
 fn recolor_icon_source(source: &str, color: &str) -> String {
