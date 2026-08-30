@@ -1459,7 +1459,7 @@ impl ViewState {
         let filter_button = gtk::ToggleButton::builder()
             .tooltip_text("Filter this pane")
             .build();
-        filter_button.set_child(Some(&crate::assets::primary_icon(
+        filter_button.set_child(Some(&crate::assets::text_icon(
             crate::assets::icons::FUNNEL,
             16,
         )));
@@ -1479,10 +1479,7 @@ impl ViewState {
             let close = gtk::Button::builder()
                 .tooltip_text("Close this pane")
                 .build();
-            close.set_child(Some(&crate::assets::primary_icon(
-                crate::assets::icons::X,
-                16,
-            )));
+            close.set_child(Some(&crate::assets::text_icon(crate::assets::icons::X, 16)));
             close.add_css_class("column-header-action");
             let weak_browser = Rc::downgrade(&self.browser);
             close.connect_clicked(move |_| {
@@ -2993,7 +2990,7 @@ fn column_sort_menu(browser: &Rc<Browser>, depth: usize) -> gtk::MenuButton {
         .tooltip_text("Choose sort field")
         .popover(&popover)
         .build();
-    button.set_child(Some(&crate::assets::primary_icon(
+    button.set_child(Some(&crate::assets::text_icon(
         crate::assets::icons::SETTINGS_2,
         16,
     )));
@@ -3005,17 +3002,17 @@ fn column_sort_direction_toggle(browser: &Rc<Browser>, depth: usize) -> gtk::Tog
     let button = gtk::ToggleButton::builder()
         .tooltip_text("Ascending — click to reverse")
         .build();
-    let icon = crate::assets::primary_icon(crate::assets::icons::ARROW_UP_NARROW_WIDE, 16);
+    let icon = crate::assets::text_icon(crate::assets::icons::ARROW_UP_NARROW_WIDE, 16);
     button.set_child(Some(&icon));
     button.add_css_class("column-header-action");
     let weak_browser = Rc::downgrade(browser);
     button.connect_toggled(move |button| {
         let direction = if button.is_active() {
-            crate::assets::set_primary_icon(&icon, crate::assets::icons::ARROW_DOWN_WIDE_NARROW);
+            crate::assets::set_text_icon(&icon, crate::assets::icons::ARROW_DOWN_WIDE_NARROW);
             button.set_tooltip_text(Some("Descending — click to reverse"));
             SortDirection::Descending
         } else {
-            crate::assets::set_primary_icon(&icon, crate::assets::icons::ARROW_UP_NARROW_WIDE);
+            crate::assets::set_text_icon(&icon, crate::assets::icons::ARROW_UP_NARROW_WIDE);
             button.set_tooltip_text(Some("Ascending — click to reverse"));
             SortDirection::Ascending
         };

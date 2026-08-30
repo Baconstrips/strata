@@ -760,22 +760,28 @@ menubutton.column-header-action > button {
 }
 
 button.column-header-action:hover,
+button.column-header-action:active,
 button.column-header-action:checked,
 menubutton.column-header-action > button:hover,
+menubutton.column-header-action > button:active,
 menubutton.column-header-action > button:checked {
   background: alpha(@theme_muted, 0.62);
 }
 
 .column-header-action image {
-  color: @theme_border;
-  opacity: 0.58;
+  color: @theme_text;
+  opacity: 0.42;
 }
 
 button.column-header-action:hover image,
+button.column-header-action:active image,
 button.column-header-action:checked image,
+button.column-header-action:focus-visible image,
 menubutton.column-header-action > button:hover image,
-menubutton.column-header-action > button:checked image {
-  opacity: 0.9;
+menubutton.column-header-action > button:active image,
+menubutton.column-header-action > button:checked image,
+menubutton.column-header-action > button:focus-visible image {
+  opacity: 1;
 }
 
 .column-filter {
@@ -1168,6 +1174,7 @@ menubutton.column-header-action > button:checked image {
 .file-list {
   background: @theme_bg;
   color: @theme_text;
+  padding-top: 4px;
 }
 
 .file-list row {
