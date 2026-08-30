@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#[cfg(test)]
+mod tests;
+
 use std::{future::Future, pin::Pin, rc::Rc};
 
 use gtk::{gio, glib, prelude::*};
@@ -17,6 +20,53 @@ fn gio_file(location: &Location) -> gio::File {
         .native_path()
         .map(gio::File::for_path)
         .unwrap_or_else(|| gio::File::for_uri(location.uri_value().unwrap_or_default()))
+}
+
+fn copy_recursively(
+    source: gio::File,
+    target: gio::File,
+) -> Pin<Box<dyn Future<Output = Result<(), glib::Error>>>> {
+    Box::pin(async move {
+        let info = source
+            .query_info_future(
+                "standard::type",
+                gio::FileQueryInfoFlags::NOFOLLOW_SYMLINKS,
+                glib::Priority::DEFAULT,
+            )
+            .await?;
+        if info.file_type() == gio::FileType::Directory {
+            target
+                .make_directory_future(glib::Priority::DEFAULT)
+                .await?;
+            let enumerator = source
+                .enumerate_children_future(
+                    "standard::name",
+                    gio::FileQueryInfoFlags::NOFOLLOW_SYMLINKS,
+                    glib::Priority::DEFAULT,
+                )
+                .await?;
+            loop {
+                let children = enumerator
+                    .next_files_future(64, glib::Priority::DEFAULT)
+                    .await?;
+                if children.is_empty() {
+                    break;
+                }
+                for child in children {
+                    copy_recursively(source.child(child.name()), target.child(child.name()))
+                        .await?;
+                }
+            }
+            Ok(())
+        } else {
+            let (copy, _progress) = source.copy_future(
+                &target,
+                gio::FileCopyFlags::ALL_METADATA | gio::FileCopyFlags::NOFOLLOW_SYMLINKS,
+                glib::Priority::DEFAULT,
+            );
+            copy.await
+        }
+    })
 }
 
 fn permanently_delete(
@@ -115,9 +165,27 @@ impl OperationProvider for LocalOperationProvider {
                     return;
                 };
                 let target = destination.child(name);
-                let (copy, _progress) =
-                    source.copy_future(&target, gio::FileCopyFlags::NONE, glib::Priority::DEFAULT);
-                if let Err(error) = copy.await {
+                if source.equal(&target)
+                    || source.equal(&destination)
+                    || destination.has_prefix(&source)
+                {
+                    emit(OperationEvent::Failed {
+                        request_id: request.id,
+                        message: "A file or folder cannot be transferred into itself".to_owned(),
+                    });
+                    return;
+                }
+                let result = if request.move_sources {
+                    let (transfer, _progress) = source.move_future(
+                        &target,
+                        gio::FileCopyFlags::ALL_METADATA | gio::FileCopyFlags::NOFOLLOW_SYMLINKS,
+                        glib::Priority::DEFAULT,
+                    );
+                    transfer.await
+                } else {
+                    copy_recursively(source, target).await
+                };
+                if let Err(error) = result {
                     emit(OperationEvent::Failed {
                         request_id: request.id,
                         message: error.to_string(),

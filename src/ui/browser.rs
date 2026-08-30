@@ -453,7 +453,15 @@ impl BrowserView {
         if entries.is_empty() {
             return false;
         }
-        self.state.show_delete_confirmation(entries, permanent);
+        let in_trash = self
+            .state
+            .focused_column_depth()
+            .and_then(|depth| self.state.browser.location_at(depth))
+            .or_else(|| self.state.browser.active_location())
+            .as_ref()
+            .is_some_and(is_trash_location);
+        self.state
+            .show_delete_confirmation(entries, permanent || in_trash);
         true
     }
 
@@ -852,8 +860,7 @@ impl ViewState {
                 .map(metadata_modified)
                 .unwrap_or_else(|| "—".to_owned()),
         );
-        let opens_with =
-            properties_row(&details, "OPENS WITH", if is_directory { "—" } else { "—" });
+        let opens_with = properties_row(&details, "OPENS WITH", "—");
         let hidden = properties_row(
             &details,
             "HIDDEN",
@@ -1645,6 +1652,88 @@ impl ViewState {
                 }
             });
             row.add_controller(motion);
+
+            let drag = gtk::DragSource::builder()
+                .actions(gtk::gdk::DragAction::COPY | gtk::gdk::DragAction::MOVE)
+                .build();
+            let weak_state_for_drag = weak_state.clone();
+            let dragged_item = item.clone();
+            let source_for_drag = source_for_hover.clone();
+            let filtered_for_drag = filtered_for_hover.clone();
+            drag.connect_prepare(move |source, x, y| {
+                let state = weak_state_for_drag.upgrade()?;
+                let source_position = source_position_for_filtered(
+                    &source_for_drag,
+                    &filtered_for_drag,
+                    dragged_item.position(),
+                )?;
+                let entry = state.browser.entry_at(depth, source_position)?;
+                let selected = state.browser.selected_entries();
+                let entries = if selected
+                    .iter()
+                    .any(|selected| selected.location == entry.location)
+                {
+                    selected
+                } else {
+                    vec![entry]
+                };
+                let paintable = gtk::WidgetPaintable::new(source.widget().as_ref());
+                source.set_icon(Some(&paintable), x.round() as i32, y.round() as i32);
+                file_drag_content(&entries)
+            });
+            let dragged_row = row.clone();
+            drag.connect_drag_begin(move |_, _| dragged_row.add_css_class("dragging"));
+            let dragged_row = row.clone();
+            drag.connect_drag_end(move |_, _, _| dragged_row.remove_css_class("dragging"));
+            row.add_controller(drag);
+
+            let drop = gtk::DropTarget::new(
+                gtk::gdk::FileList::static_type(),
+                gtk::gdk::DragAction::COPY | gtk::gdk::DragAction::MOVE,
+            );
+            let weak_state_for_accept = weak_state.clone();
+            let accepted_item = item.clone();
+            let source_for_accept = source_for_hover.clone();
+            let filtered_for_accept = filtered_for_hover.clone();
+            drop.connect_accept(move |_, offered| {
+                let Some(state) = weak_state_for_accept.upgrade() else {
+                    return false;
+                };
+                let entry = source_position_for_filtered(
+                    &source_for_accept,
+                    &filtered_for_accept,
+                    accepted_item.position(),
+                )
+                .and_then(|position| state.browser.entry_at(depth, position));
+                entry.is_some_and(|entry| {
+                    entry.is_directory()
+                        && offered
+                            .formats()
+                            .contains_type(gtk::gdk::FileList::static_type())
+                })
+            });
+            let weak_state_for_drop = weak_state.clone();
+            let dropped_item = item.clone();
+            let source_for_drop = source_for_hover.clone();
+            let filtered_for_drop = filtered_for_hover.clone();
+            drop.connect_drop(move |target, value, _, _| {
+                let Some(state) = weak_state_for_drop.upgrade() else {
+                    return false;
+                };
+                let Some(destination) = source_position_for_filtered(
+                    &source_for_drop,
+                    &filtered_for_drop,
+                    dropped_item.position(),
+                )
+                .and_then(|position| state.browser.entry_at(depth, position))
+                .filter(FileEntry::is_directory)
+                .map(|entry| entry.location) else {
+                    return false;
+                };
+                transfer_dropped_files(&state, target, value, destination)
+            });
+            row.add_controller(drop);
+
             let selection_click = gtk::GestureClick::new();
             selection_click.set_button(1);
             selection_click.set_propagation_phase(gtk::PropagationPhase::Capture);
@@ -1656,7 +1745,6 @@ impl ViewState {
             let source_for_click = source_for_hover.clone();
             let filtered_for_click = filtered_for_hover.clone();
             selection_click.connect_pressed(move |gesture, press_count, _, _| {
-                gesture.set_state(gtk::EventSequenceState::Claimed);
                 let position = clicked_item.position();
                 if position == gtk::INVALID_LIST_POSITION {
                     return;
@@ -1984,6 +2072,7 @@ impl ViewState {
         new_folder_entry.add_controller(new_folder_focus);
 
         let presentation = LoadPresentation::new(&scroll, Some(retry));
+        install_directory_drop_target(self, &presentation.stack, location.clone());
         install_folder_context_menu(self, &presentation.stack, &list, depth, location.clone());
         install_item_context_menu(
             self,
@@ -2564,6 +2653,11 @@ fn install_item_context_menu(
     filtered: &gtk::FilterListModel,
     depth: usize,
 ) {
+    let in_trash = state
+        .browser
+        .location_at(depth)
+        .as_ref()
+        .is_some_and(is_trash_location);
     let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
     content.add_css_class("item-context-menu");
     let header = gtk::Box::new(gtk::Orientation::Vertical, 2);
@@ -2589,8 +2683,13 @@ fn install_item_context_menu(
     let copy_path = item_context_option(crate::assets::icons::COPY, "Copy path", "Y");
     let rename = item_context_option(crate::assets::icons::PENCIL, "Rename", "F2");
     let cut = item_context_option(crate::assets::icons::SCISSORS, "Cut", "Ctrl+X");
+    let delete_label = if in_trash {
+        "Permanently delete"
+    } else {
+        "Move to Trash"
+    };
     let move_to_trash =
-        item_context_danger_option(crate::assets::icons::TRASH, "Move to Trash", "Del");
+        item_context_danger_option(crate::assets::icons::TRASH, delete_label, "Del");
     move_to_trash.add_css_class("danger");
     let properties = item_context_option(crate::assets::icons::INFO, "Properties", "Alt+Enter");
     single.append(&open);
@@ -2609,7 +2708,7 @@ fn install_item_context_menu(
     let copy_paths = item_context_option(crate::assets::icons::COPY, "Copy paths", "Y");
     let cut_multiple = item_context_option(crate::assets::icons::SCISSORS, "Cut", "Ctrl+X");
     let trash_multiple =
-        item_context_danger_option(crate::assets::icons::TRASH, "Move to Trash", "Del");
+        item_context_danger_option(crate::assets::icons::TRASH, delete_label, "Del");
     trash_multiple.add_css_class("danger");
     multiple.append(&copy_paths);
     multiple.append(&cut_multiple);
@@ -2696,8 +2795,8 @@ fn install_item_context_menu(
     });
     connect_context_cut(&cut, &popover, state, &target);
     connect_context_cut(&cut_multiple, &popover, state, &target);
-    connect_context_trash(&move_to_trash, &popover, state, &target);
-    connect_context_trash(&trash_multiple, &popover, state, &target);
+    connect_context_trash(&move_to_trash, &popover, state, &target, in_trash);
+    connect_context_trash(&trash_multiple, &popover, state, &target, in_trash);
     let weak = Rc::downgrade(state);
     let properties_target = target.clone();
     let properties_popover = popover.downgrade();
@@ -2832,6 +2931,7 @@ fn connect_context_trash(
     popover: &gtk::Popover,
     state: &Rc<ViewState>,
     target: &Rc<RefCell<Option<(usize, FileEntry)>>>,
+    permanent: bool,
 ) {
     let weak = Rc::downgrade(state);
     let target = target.clone();
@@ -2842,7 +2942,7 @@ fn connect_context_trash(
         }
         if let Some(state) = weak.upgrade() {
             let entries = context_entries(&state, &target);
-            state.show_delete_confirmation(entries, false);
+            state.show_delete_confirmation(entries, permanent);
         }
     });
 }
@@ -2864,6 +2964,80 @@ fn connect_context_cut(
             copy_files_to_clipboard(&context_entries(&state, &target));
         }
     });
+}
+
+fn install_directory_drop_target(
+    state: &Rc<ViewState>,
+    widget: &impl IsA<gtk::Widget>,
+    destination: Location,
+) {
+    widget.add_css_class("file-drop-zone");
+    let drop = gtk::DropTarget::new(
+        gtk::gdk::FileList::static_type(),
+        gtk::gdk::DragAction::COPY | gtk::gdk::DragAction::MOVE,
+    );
+    let weak = Rc::downgrade(state);
+    drop.connect_drop(move |target, value, _, _| {
+        let Some(state) = weak.upgrade() else {
+            return false;
+        };
+        transfer_dropped_files(&state, target, value, destination.clone())
+    });
+    widget.add_controller(drop);
+}
+
+fn transfer_dropped_files(
+    state: &Rc<ViewState>,
+    target: &gtk::DropTarget,
+    value: &glib::Value,
+    destination: Location,
+) -> bool {
+    let Ok(files) = value.get::<gtk::gdk::FileList>() else {
+        return false;
+    };
+    let sources = files
+        .files()
+        .iter()
+        .map(location_for_gio_file)
+        .collect::<Vec<_>>();
+    if sources.is_empty() {
+        return false;
+    }
+    let move_sources = target
+        .current_drop()
+        .and_then(|drop| drop.drag())
+        .is_some_and(|drag| drag.selected_action() == gtk::gdk::DragAction::MOVE);
+    state.browser.transfer(destination, sources, move_sources);
+    true
+}
+
+fn location_for_gio_file(file: &gio::File) -> Location {
+    file.path()
+        .map(Location::local)
+        .unwrap_or_else(|| Location::uri(file.uri().as_str()))
+}
+
+fn file_drag_content(entries: &[FileEntry]) -> Option<gtk::gdk::ContentProvider> {
+    let files = entries
+        .iter()
+        .map(|entry| gio_file_for_location(&entry.location))
+        .collect::<Vec<_>>();
+    if files.is_empty() {
+        return None;
+    }
+    let file_list =
+        gtk::gdk::ContentProvider::for_value(&gtk::gdk::FileList::from_array(&files).to_value());
+    let uri_list = files
+        .iter()
+        .map(|file| file.uri())
+        .collect::<Vec<_>>()
+        .join("\r\n")
+        + "\r\n";
+    let uri_list = gtk::gdk::ContentProvider::for_bytes(
+        "text/uri-list",
+        &glib::Bytes::from_owned(uri_list.into_bytes()),
+    );
+    Some(gtk::gdk::ContentProvider::new_union(&[file_list, uri_list]))
 }
 
 fn copy_locations(entries: &[FileEntry]) {
@@ -3309,6 +3483,12 @@ fn gio_file_for_location(location: &Location) -> gio::File {
         .native_path()
         .map(gio::File::for_path)
         .unwrap_or_else(|| gio::File::for_uri(location.uri_value().unwrap_or_default()))
+}
+
+fn is_trash_location(location: &Location) -> bool {
+    location
+        .uri_value()
+        .is_some_and(|uri| uri.starts_with("trash:"))
 }
 
 fn compact_display_path(location: &Location) -> String {

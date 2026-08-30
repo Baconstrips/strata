@@ -5,6 +5,16 @@ window {
   font-size: 13px;
 }
 
+button:focus-visible,
+entry:focus-visible,
+switch:focus-visible,
+row:focus-visible,
+flowboxchild:focus-visible,
+paned > separator:focus-visible {
+  outline: 2px solid @theme_accent;
+  outline-offset: -2px;
+}
+
 headerbar {
   background: @theme_surface;
   border-bottom: 1px solid alpha(@theme_border, 0.6);
@@ -143,7 +153,6 @@ headerbar menubutton.header-action > button:focus-visible image {
   caret-color: @theme_accent;
   color: @theme_text;
   min-height: 22px;
-  outline: none;
 }
 
 .location-entry:focus {
@@ -407,8 +416,7 @@ headerbar menubutton.header-action > button:focus-visible image {
 
 .delete-confirmation-delete:focus-visible {
   border-color: @theme_danger;
-  outline: 2px solid alpha(@theme_danger, 0.58);
-  outline-offset: 1px;
+  outline-color: @theme_accent;
 }
 
 .settings-dialog {
@@ -803,7 +811,6 @@ menubutton.column-header-action > button:focus-visible image {
   box-shadow: none;
   color: @theme_text;
   min-height: 28px;
-  outline: none;
   padding: 0;
 }
 
@@ -1056,7 +1063,6 @@ menubutton.column-header-action > button:focus-visible image {
   box-shadow: none;
   color: @theme_text;
   min-height: 26px;
-  outline: none;
   padding: 1px 6px;
 }
 
@@ -1100,8 +1106,7 @@ menubutton.column-header-action > button:focus-visible image {
 }
 
 .item-context-option.danger:focus-visible {
-  outline: 1px solid alpha(@theme_danger, 0.64);
-  outline-offset: -1px;
+  outline-color: @theme_accent;
 }
 
 .folder-context-menu separator {
@@ -1117,7 +1122,6 @@ menubutton.column-header-action > button:focus-visible image {
   box-shadow: none;
   color: @theme_text;
   min-height: 30px;
-  outline: none;
   padding: 3px 8px;
 }
 
@@ -1145,8 +1149,7 @@ menubutton.column-header-action > button:focus-visible image {
 }
 
 .folder-context-option.danger:focus-visible {
-  outline: 1px solid alpha(@theme_danger, 0.64);
-  outline-offset: -1px;
+  outline-color: @theme_accent;
 }
 
 .folder-context-option:disabled {
@@ -1189,6 +1192,21 @@ menubutton.column-header-action > button:focus-visible image {
   border-radius: 6px;
   color: @theme_text;
   padding: 4px;
+}
+
+.file-row.dragging {
+  opacity: 0.48;
+}
+
+.file-row:drop(active) {
+  background: alpha(@theme_highlight, 0.72);
+  color: @theme_accent;
+  outline: 1px solid @theme_accent;
+  outline-offset: -1px;
+}
+
+.file-drop-zone:drop(active) {
+  box-shadow: inset 0 0 0 1px alpha(@theme_accent, 0.72);
 }
 
 .file-list row:hover {
@@ -1242,6 +1260,11 @@ menubutton.column-header-action > button:focus-visible image {
   background: alpha(@theme_muted, 0.65);
   color: @theme_text;
   outline: none;
+}
+
+.file-list row:focus-visible {
+  outline: 2px solid @theme_accent;
+  outline-offset: -2px;
 }
 
 .file-marquee {

@@ -167,8 +167,9 @@ Legend: **P0** blocks the milestone, **P1** is required for its exit criteria, *
 - [x] **P0** Paste a GDK file-list clipboard into the active folder with `Ctrl+V` or the folder background menu
 - [ ] **P0** Use interoperable file-manager clipboard formats for external copy/cut/paste
 - [ ] **P0** Enable Cut/Copy based on selection and Paste based on clipboard contents and destination writability
-- [ ] **P0** Drag and drop between locations within Strata
-- [ ] **P0** Export selected files as GTK/GDK file-list and `text/uri-list` drag data for browsers, editors, desktop targets, and other external applications
+- [x] **P0** Drag and drop files and folders between locations within Strata with negotiated copy/move actions
+- [x] **P0** Accept GDK file-list drops from external applications
+- [x] **P0** Export selected files as GTK/GDK file-list and `text/uri-list` drag data for browsers, editors, desktop targets, and other external applications
 - [ ] **P1** Test outbound file dragging across native Wayland applications, XWayland applications, and browser upload targets
 - [ ] **P1** Removable media mount, unmount, and disconnect states
 - [ ] **P1** Show an Unmount action only for volumes that report they can be unmounted
@@ -210,6 +211,30 @@ Legend: **P0** blocks the milestone, **P1** is required for its exit criteria, *
 - [ ] **P1** Directory summary
 - [x] **P2** Source syntax highlighting and line numbers
 - [ ] **P2** Configurable monospace preview font
+
+### Thumbnails
+
+- [ ] **P0** Generate asynchronous file-list thumbnails for mainstream image formats
+- [ ] **P0** Generate representative file-list thumbnails for mainstream video formats
+- [ ] **P0** Keep thumbnail decoding, scaling, and delivery cancellable, bounded, and stale-result-safe
+- [ ] **P0** Fall back cleanly to semantic file icons when thumbnails are disabled, unavailable, malformed, or still loading
+- [ ] **P1** Add a “Show file previews” preference, with explanatory text that thumbnail generation can increase CPU and disk activity
+- [ ] **P1** Apply the thumbnail preference live without restarting or blocking navigation
+- [ ] **P1** Integrate generated thumbnails with the Freedesktop-compatible thumbnail cache
+- [ ] **P1** Test large directories, rapid scrolling, large media, unsupported codecs, and corrupt files
+
+### Preview plugin architecture
+
+- [ ] **P0** Define a versioned, capability-limited plugin protocol for thumbnail and preview providers
+- [ ] **P0** Add plugin discovery, manifests, compatibility checks, and deterministic provider priority/fallback rules
+- [ ] **P0** Let plugins advertise MIME/extension support and render bounded thumbnails, including specialist formats such as camera RAW
+- [ ] **P0** Let plugins provide image content for the preview pane without gaining access to navigation or unrelated application state
+- [ ] **P0** Enforce cancellation, time, memory, pixel, concurrency, and failure-isolation boundaries across plugin calls
+- [ ] **P0** Decide and document process isolation, trust, permission, and malformed-output handling before loading third-party code
+- [ ] **P1** Use the same provider registry and contracts for bundled and third-party image/video providers
+- [ ] **P1** Add plugin diagnostics without allowing provider failures to interrupt browsing
+- [ ] **P1** Publish provider-development documentation and at least one example plugin
+- [ ] **P2** Evaluate additional capabilities only after the preview protocol is stable
 
 ## M4 — Presentation and customization
 
@@ -256,7 +281,7 @@ Legend: **P0** blocks the milestone, **P1** is required for its exit criteria, *
 
 ## Later
 
-- [ ] Design a versioned, capability-limited extension protocol
+- [ ] Expand the capability-limited plugin protocol beyond previews only after the preview provider API is proven
 - [ ] Evaluate remote location adapters
 - [ ] Evaluate archive browsing
 - [ ] Evaluate independent panes, tabs, and saved workspaces

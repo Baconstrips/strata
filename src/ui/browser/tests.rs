@@ -33,7 +33,7 @@ fn delete_confirmation_labels_distinguish_files_and_folders() {
 
     assert_eq!(item_count_label(1), "1 item");
     assert_eq!(item_count_label(2), "2 items");
-    assert_eq!(entry_kind_summary(&[file.clone()]), "1 file");
+    assert_eq!(entry_kind_summary(std::slice::from_ref(&file)), "1 file");
     assert_eq!(entry_kind_summary(&[file.clone(), file.clone()]), "2 files");
     assert_eq!(entry_kind_summary(&[folder.clone()]), "1 folder");
     assert_eq!(entry_kind_summary(&[file, folder]), "2 items");
@@ -58,6 +58,15 @@ fn multi_selection_summary_lists_at_most_three_names() {
         selected_items_summary(&[entry("one"), entry("two"), entry("three"), entry("four")]),
         "one, two, three, …"
     );
+}
+
+#[test]
+fn trash_locations_include_the_root_and_descendants() {
+    assert!(is_trash_location(&Location::uri("trash:///")));
+    assert!(is_trash_location(&Location::uri("trash:///folder")));
+    assert!(!is_trash_location(&Location::local(
+        "/home/example/.local/share/Trash"
+    )));
 }
 
 #[test]

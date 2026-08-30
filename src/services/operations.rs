@@ -28,6 +28,7 @@ pub struct PasteRequest {
     pub id: OperationRequestId,
     pub destination: Location,
     pub sources: Vec<Location>,
+    pub move_sources: bool,
 }
 
 #[derive(Clone, Debug)]

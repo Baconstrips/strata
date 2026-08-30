@@ -683,6 +683,7 @@ version = "0.1.0"
 dependencies = [
  "cairo-rs",
  "gdk-pixbuf",
+ "gio",
  "glib-build-tools",
  "gtk4",
  "poppler-rs",

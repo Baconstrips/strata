@@ -484,6 +484,15 @@ impl Browser {
     }
 
     pub fn paste(self: &Rc<Self>, destination: Location, sources: Vec<Location>) {
+        self.transfer(destination, sources, false);
+    }
+
+    pub fn transfer(
+        self: &Rc<Self>,
+        destination: Location,
+        sources: Vec<Location>,
+        move_sources: bool,
+    ) {
         if sources.is_empty() {
             return;
         }
@@ -499,6 +508,7 @@ impl Browser {
                 id: request_id,
                 destination,
                 sources,
+                move_sources,
             },
             self.operation_callback(request_id, false),
         );
