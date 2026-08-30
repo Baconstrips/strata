@@ -1791,15 +1791,19 @@ impl ViewState {
         details.add_css_class("properties-details");
         let location_value = properties_row(&details, "LOCATION", &compact_display_path(&location));
         location_value.set_tooltip_text(Some(&location.display_path()));
-        let initial_size = entry
-            .as_ref()
-            .and_then(|entry| match entry.size {
-                crate::model::MetadataValue::Known(size) => Some(format_file_size(size)),
-                crate::model::MetadataValue::Unknown | crate::model::MetadataValue::Unavailable => {
-                    None
-                }
-            })
-            .unwrap_or_else(|| "—".to_owned());
+        let trash_root = is_trash_root(&location);
+        let initial_size = if trash_root {
+            "Calculating…".to_owned()
+        } else {
+            entry
+                .as_ref()
+                .and_then(|entry| match entry.size {
+                    crate::model::MetadataValue::Known(size) => Some(format_file_size(size)),
+                    crate::model::MetadataValue::Unknown
+                    | crate::model::MetadataValue::Unavailable => None,
+                })
+                .unwrap_or_else(|| "—".to_owned())
+        };
         let size = properties_row(&details, "SIZE", &initial_size);
         let modified = properties_row(
             &details,
@@ -1902,6 +1906,23 @@ impl ViewState {
         });
         layer.add_controller(escape);
         layer.grab_focus();
+
+        if trash_root {
+            let weak_size = size.downgrade();
+            glib::MainContext::default().spawn_local(async move {
+                let summary = summarize_trash(&gio::File::for_uri("trash:///")).await;
+                let Some(size) = weak_size.upgrade() else {
+                    return;
+                };
+                match summary {
+                    Ok(summary) => {
+                        size.set_text(&format_file_size(summary.total_size));
+                        size.set_tooltip_text(Some(&item_count_label(summary.item_count)));
+                    }
+                    Err(_) => size.set_text("Unavailable"),
+                }
+            });
+        }
 
         let file = gio_file_for_location(&location);
         glib::MainContext::default().spawn_local(async move {
@@ -5022,6 +5043,10 @@ fn gio_file_for_location(location: &Location) -> gio::File {
         .native_path()
         .map(gio::File::for_path)
         .unwrap_or_else(|| gio::File::for_uri(location.uri_value().unwrap_or_default()))
+}
+
+fn is_trash_root(location: &Location) -> bool {
+    location.uri_value() == Some("trash:///")
 }
 
 fn is_trash_location(location: &Location) -> bool {

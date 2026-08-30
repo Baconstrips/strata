@@ -40,6 +40,15 @@ fn delete_confirmation_labels_distinguish_files_and_folders() {
 }
 
 #[test]
+fn only_the_trash_root_uses_the_aggregate_properties_size() {
+    assert!(is_trash_root(&Location::uri("trash:///")));
+    assert!(!is_trash_root(&Location::uri("trash:///photo.png")));
+    assert!(!is_trash_root(&Location::local(
+        "/home/user/.local/share/Trash"
+    )));
+}
+
+#[test]
 fn quick_preview_is_offered_only_for_supported_files() {
     let entry = |name: &str, kind| FileEntry {
         location: Location::local(format!("/fixture/{name}")),
