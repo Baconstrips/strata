@@ -11,7 +11,7 @@ use gtk::{gdk, glib, prelude::*};
 
 use crate::{
     assets::icons,
-    services::{self, UpdateCheck},
+    services::{self, UpdateCheck, UpdateInstall},
 };
 
 use super::{
@@ -256,16 +256,27 @@ fn update_check_row(
     row.append(&button);
 
     let checking = Rc::new(Cell::new(false));
+    // Set once a check finds an update this platform can install; consumed by the
+    // button's next click instead of re-running a check.
+    let pending_download = Rc::new(RefCell::new(None::<String>));
+    // Set once an install finishes, so the next click restarts instead of re-checking.
+    let installed = Rc::new(Cell::new(false));
+
     let run_check: Rc<dyn Fn()> = Rc::new({
         let checking = checking.clone();
         let status = status.clone();
         let button = button.clone();
         let manager = manager.clone();
         let update_notice = update_notice.clone();
+        let pending_download = pending_download.clone();
+        let installed = installed.clone();
         move || {
             if checking.replace(true) {
                 return;
             }
+            *pending_download.borrow_mut() = None;
+            installed.set(false);
+            button.set_label("Check now");
             status.set_text("Checking for updates…");
             button.set_sensitive(false);
             let receiver = services::check_for_updates(env!("CARGO_PKG_VERSION"));
@@ -274,18 +285,27 @@ fn update_check_row(
             let button = button.clone();
             let manager = manager.clone();
             let update_notice = update_notice.clone();
+            let pending_download = pending_download.clone();
             glib::timeout_add_local(Duration::from_millis(100), move || {
                 match receiver.try_recv() {
                     Ok(result) => {
                         status.set_markup(&update_check_message(&result));
                         match &result {
-                            UpdateCheck::Available { version, url }
+                            UpdateCheck::Available { version, url, .. }
                                 if manager.checks_for_updates() =>
                             {
                                 update_notice(Some((version.clone(), url.clone())));
                             }
                             UpdateCheck::UpToDate => update_notice(None),
                             UpdateCheck::Available { .. } | UpdateCheck::Failed(_) => {}
+                        }
+                        if let UpdateCheck::Available {
+                            download_url: Some(download_url),
+                            ..
+                        } = &result
+                        {
+                            *pending_download.borrow_mut() = Some(download_url.clone());
+                            button.set_label("Install update");
                         }
                         button.set_sensitive(true);
                         checking.set(false);
@@ -302,9 +322,74 @@ fn update_check_row(
             });
         }
     });
+
     let clicked_check = run_check.clone();
-    button.connect_clicked(move |_| clicked_check());
+    button.connect_clicked(move |button| {
+        if installed.get() {
+            restart_application(button);
+            return;
+        }
+        if let Some(download_url) = pending_download.borrow_mut().take() {
+            if checking.replace(true) {
+                return;
+            }
+            status.set_text("Installing update…");
+            button.set_sensitive(false);
+            let receiver = services::install_update(download_url);
+            let checking = checking.clone();
+            let status = status.clone();
+            let button = button.clone();
+            let installed = installed.clone();
+            glib::timeout_add_local(Duration::from_millis(100), move || {
+                match receiver.try_recv() {
+                    Ok(UpdateInstall::Installed) => {
+                        status.set_text("Update installed — restart to apply");
+                        button.set_label("Restart now");
+                        button.set_sensitive(true);
+                        installed.set(true);
+                        checking.set(false);
+                        glib::ControlFlow::Break
+                    }
+                    Ok(UpdateInstall::Failed(message)) => {
+                        status.set_text(&format!("Couldn't install update: {message}"));
+                        button.set_label("Check now");
+                        button.set_sensitive(true);
+                        checking.set(false);
+                        glib::ControlFlow::Break
+                    }
+                    Err(TryRecvError::Empty) => glib::ControlFlow::Continue,
+                    Err(TryRecvError::Disconnected) => {
+                        status.set_text("Couldn't install update");
+                        button.set_label("Check now");
+                        button.set_sensitive(true);
+                        checking.set(false);
+                        glib::ControlFlow::Break
+                    }
+                }
+            });
+        } else {
+            clicked_check();
+        }
+    });
     (row, run_check)
+}
+
+/// Relaunches the (just-updated) executable and quits the current instance.
+fn restart_application(button: &gtk::Button) {
+    let Ok(current_exe) = std::env::current_exe() else {
+        return;
+    };
+    if std::process::Command::new(current_exe).spawn().is_err() {
+        return;
+    }
+    let application = button
+        .root()
+        .and_then(|root| root.downcast::<gtk::Window>().ok())
+        .and_then(|window| window.application());
+    match application {
+        Some(application) => application.quit(),
+        None => std::process::exit(0),
+    }
 }
 
 fn update_check_message(result: &UpdateCheck) -> String {
@@ -312,7 +397,7 @@ fn update_check_message(result: &UpdateCheck) -> String {
         UpdateCheck::UpToDate => {
             format!("Up to date — version {}", env!("CARGO_PKG_VERSION"))
         }
-        UpdateCheck::Available { version, url } => format!(
+        UpdateCheck::Available { version, url, .. } => format!(
             "Update available: <a href=\"{}\">v{}</a>",
             glib::markup_escape_text(url),
             glib::markup_escape_text(version),

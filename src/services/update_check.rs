@@ -13,7 +13,11 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum UpdateCheck {
     UpToDate,
-    Available { version: String, url: String },
+    Available {
+        version: String,
+        url: String,
+        download_url: Option<String>,
+    },
     Failed(String),
 }
 
@@ -21,6 +25,22 @@ pub enum UpdateCheck {
 struct ReleaseResponse {
     tag_name: String,
     html_url: String,
+    #[serde(default)]
+    assets: Vec<ReleaseAsset>,
+}
+
+#[derive(Deserialize)]
+struct ReleaseAsset {
+    name: String,
+    browser_download_url: String,
+}
+
+/// The asset naming convention published by `.github/workflows/release.yml`.
+fn archive_name(version: &str) -> String {
+    format!(
+        "strata-{version}-{}-unknown-linux-gnu.tar.gz",
+        std::env::consts::ARCH
+    )
 }
 
 /// Queries the latest GitHub release off the GTK thread and reports the outcome once.
@@ -50,9 +70,16 @@ fn fetch_latest_release(current_version: &str) -> UpdateCheck {
         Ok(release) => {
             let latest = release.tag_name.trim_start_matches('v');
             if is_newer(latest, current_version) {
+                let archive_name = archive_name(latest);
+                let download_url = release
+                    .assets
+                    .iter()
+                    .find(|asset| asset.name == archive_name)
+                    .map(|asset| asset.browser_download_url.clone());
                 UpdateCheck::Available {
                     version: latest.to_owned(),
                     url: release.html_url,
+                    download_url,
                 }
             } else {
                 UpdateCheck::UpToDate
