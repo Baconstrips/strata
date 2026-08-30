@@ -412,7 +412,7 @@ impl BrowserView {
     }
 
     pub fn cancel_new_folder(&self) -> bool {
-        self.state.cancel_new_folder()
+        self.state.cancel_new_folder() || self.state.mode_views.borrow().cancel_new_folder()
     }
 
     pub fn rename_is_active(&self) -> bool {
@@ -422,6 +422,7 @@ impl BrowserView {
 
     pub fn new_folder_is_active(&self) -> bool {
         self.state.active_new_folder.borrow().is_some()
+            || self.state.mode_views.borrow().new_folder_is_active()
     }
 
     pub fn preview_occupied_width(&self) -> i32 {
@@ -529,7 +530,11 @@ impl BrowserView {
                 .location_at(depth)
                 .map(|location| (depth, location))
         }) {
-            self.state.begin_new_folder(depth, location);
+            if self.view_mode() == BrowserMode::Columns {
+                self.state.begin_new_folder(depth, location);
+            } else {
+                self.state.mode_views.borrow().begin_new_folder(depth);
+            }
         }
     }
 

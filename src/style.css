@@ -2016,6 +2016,10 @@ menubutton.grid-thumbnail-menu > button:focus-visible {
   outline-offset: -2px;
 }
 
+.file-grid.creating-folder > child:focus-visible .grid-card {
+  outline: none;
+}
+
 .grid-card {
   border-radius: 5px;
   min-height: 0;
@@ -2188,6 +2192,10 @@ menubutton.grid-thumbnail-menu > button:focus-visible {
 .explorer-list row:focus-visible {
   outline: 2px solid @theme_accent;
   outline-offset: -2px;
+}
+
+.explorer-list.creating-folder row:focus-visible {
+  outline: none;
 }
 
 .explorer-row {

@@ -198,6 +198,7 @@ fn keybindings_page() -> gtk::Widget {
 
     append_heading(&content, "FILE OPERATIONS");
     for (label, keys) in [
+        ("Create new folder", "Ctrl + Shift + N"),
         ("Cut", "Ctrl + X"),
         ("Copy", "Ctrl + C"),
         ("Paste", "Ctrl + V"),
