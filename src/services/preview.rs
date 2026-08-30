@@ -23,6 +23,7 @@ pub enum PreviewContent {
     Image,
     Media,
     Rasterized { png: Vec<u8> },
+    SandboxedMedia { data: Vec<u8> },
     Pdf { png: Vec<u8>, page: i32, pages: i32 },
     Unsupported,
 }

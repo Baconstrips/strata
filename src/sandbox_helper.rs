@@ -25,7 +25,10 @@ pub(crate) fn run(arguments: &[String]) -> Result<(), String> {
             let (png, page, pages) = render_pdf_page(input, value)?;
             (png, Some(format!("{page} {pages}")))
         }
-        "preview-media" => (render_media(input, 1400)?, None),
+        "preview-media" => {
+            render_media_preview(input, output)?;
+            return Ok(());
+        }
         _ => return Err("Unknown preview helper operation".to_owned()),
     };
     fs::write(output, png).map_err(|error| error.to_string())?;
@@ -162,6 +165,52 @@ fn render_pdf_surface(
         .write_to_png(&mut png)
         .map_err(|error| error.to_string())?;
     Ok(png)
+}
+
+fn render_media_preview(path: &Path, output: &Path) -> Result<(), String> {
+    let status = Command::new("ffmpeg")
+        .args(["-nostdin", "-v", "error", "-threads", "2", "-i"])
+        .arg(path)
+        .args([
+            "-map",
+            "0:v:0",
+            "-map",
+            "0:a:0?",
+            "-sn",
+            "-dn",
+            "-t",
+            "30",
+            "-vf",
+            "scale=w='min(1280,iw)':h=-2:force_original_aspect_ratio=decrease",
+            "-c:v",
+            "libvpx",
+            "-threads",
+            "2",
+            "-deadline",
+            "realtime",
+            "-cpu-used",
+            "8",
+            "-b:v",
+            "2M",
+            "-maxrate",
+            "3M",
+            "-bufsize",
+            "4M",
+            "-c:a",
+            "libopus",
+            "-b:a",
+            "96k",
+            "-f",
+            "webm",
+            "-y",
+        ])
+        .arg(output)
+        .status()
+        .map_err(|error| error.to_string())?;
+    status
+        .success()
+        .then_some(())
+        .ok_or_else(|| "Unable to normalize media preview".to_owned())
 }
 
 fn render_media(path: &Path, size: i32) -> Result<Vec<u8>, String> {

@@ -63,6 +63,7 @@ impl PreviewProvider for LocalPreviewProvider {
                 PreviewContent::Media => Some(ParseOperation::PreviewMedia),
                 PreviewContent::Text { .. }
                 | PreviewContent::Rasterized { .. }
+                | PreviewContent::SandboxedMedia { .. }
                 | PreviewContent::Unsupported => None,
             };
             if let Some(operation) = operation {
@@ -83,12 +84,15 @@ impl PreviewProvider for LocalPreviewProvider {
                 {
                     Ok(Ok(output)) if operation == ParseOperation::PreviewPdf => {
                         PreviewContent::Pdf {
-                            png: output.png,
+                            png: output.data,
                             page: output.page,
                             pages: output.pages,
                         }
                     }
-                    Ok(Ok(output)) => PreviewContent::Rasterized { png: output.png },
+                    Ok(Ok(output)) if operation == ParseOperation::PreviewMedia => {
+                        PreviewContent::SandboxedMedia { data: output.data }
+                    }
+                    Ok(Ok(output)) => PreviewContent::Rasterized { png: output.data },
                     Ok(Err(message)) => {
                         emit(PreviewEvent::Failed {
                             request_id,

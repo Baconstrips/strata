@@ -7,7 +7,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use gtk::{glib, prelude::*};
+use gtk::{gio, glib, prelude::*};
 use sourceview5::prelude::*;
 
 use crate::{
@@ -36,6 +36,7 @@ struct PreviewState {
     modified: gtk::Label,
     content_type: gtk::Label,
     content: gtk::Box,
+    media: RefCell<Option<gtk::Video>>,
     split: RefCell<Option<gtk::Paned>>,
     occupied_width: RefCell<Option<Rc<dyn Fn() -> i32>>>,
     current: RefCell<Option<FileEntry>>,
@@ -115,6 +116,7 @@ impl PreviewDrawer {
             modified,
             content_type,
             content,
+            media: RefCell::new(None),
             split: RefCell::new(None),
             occupied_width: RefCell::new(None),
             current: RefCell::new(None),
@@ -393,10 +395,23 @@ impl PreviewState {
                     Err(error) => self.show_message("Preview unavailable", &error.to_string()),
                 }
             }
+            PreviewContent::SandboxedMedia { data } => {
+                let bytes = glib::Bytes::from_owned(data);
+                let stream = gio::MemoryInputStream::from_bytes(&bytes);
+                let media = gtk::MediaFile::for_input_stream(&stream);
+                let video = gtk::Video::for_media_stream(Some(&media));
+                video.add_css_class("preview-media");
+                video.set_autoplay(false);
+                video.set_loop(false);
+                video.set_hexpand(true);
+                video.set_vexpand(true);
+                self.media.replace(Some(video.clone()));
+                self.content.append(&video);
+            }
             PreviewContent::Image | PreviewContent::Media => {
                 self.show_message(
                     "Preview unavailable",
-                    "The sandboxed renderer returned no image",
+                    "The sandboxed renderer returned no preview",
                 );
             }
             PreviewContent::Pdf { png, page, pages } => {
@@ -678,6 +693,11 @@ impl PreviewState {
     }
 
     fn clear_content(&self) {
+        if let Some(video) = self.media.borrow_mut().take()
+            && let Some(stream) = video.media_stream()
+        {
+            stream.set_playing(false);
+        }
         clear_box(&self.content);
     }
 

@@ -215,7 +215,7 @@ fn render_thumbnail(
         ThumbnailKind::Video => ParseOperation::ThumbnailVideo,
     };
     crate::sandbox::parse(path, operation, size.clamp(16, 256), cancellation)
-        .map(|output| output.png)
+        .map(|output| output.data)
 }
 
 #[cfg(test)]

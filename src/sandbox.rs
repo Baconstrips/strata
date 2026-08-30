@@ -39,6 +39,14 @@ impl ParseOperation {
             Self::PreviewMedia => "preview-media",
         }
     }
+
+    fn output_name(self) -> &'static str {
+        if self == Self::PreviewMedia {
+            "result.webm"
+        } else {
+            "result.png"
+        }
+    }
 }
 
 #[derive(Clone, Default)]
@@ -55,7 +63,7 @@ impl Cancellation {
 }
 
 pub(crate) struct ParseOutput {
-    pub(crate) png: Vec<u8>,
+    pub(crate) data: Vec<u8>,
     pub(crate) page: i32,
     pub(crate) pages: i32,
 }
@@ -109,18 +117,18 @@ pub(crate) fn parse(
         return Err("The sandboxed preview renderer failed".to_owned());
     }
 
-    let png_path = output.path().join("result.png");
-    let metadata =
-        fs::metadata(&png_path).map_err(|_| "The preview renderer produced no image".to_owned())?;
+    let result_path = output.path().join(operation.output_name());
+    let metadata = fs::metadata(&result_path)
+        .map_err(|_| "The preview renderer produced no output".to_owned())?;
     if metadata.len() == 0 || metadata.len() > MAX_OUTPUT_BYTES {
-        return Err("The preview renderer produced an invalid image size".to_owned());
+        return Err("The preview renderer produced an invalid output size".to_owned());
     }
-    let png = fs::read(png_path).map_err(|error| error.to_string())?;
-    if !png.starts_with(b"\x89PNG\r\n\x1a\n") {
+    let data = fs::read(result_path).map_err(|error| error.to_string())?;
+    if operation != ParseOperation::PreviewMedia && !data.starts_with(b"\x89PNG\r\n\x1a\n") {
         return Err("The preview renderer produced invalid image data".to_owned());
     }
     let (page, pages) = read_metadata(&output.path().join("result.meta"));
-    Ok(ParseOutput { png, page, pages })
+    Ok(ParseOutput { data, page, pages })
 }
 
 fn sandbox_command(
@@ -184,7 +192,7 @@ fn sandbox_command(
     command.args([
         "--",
         "/usr/bin/prlimit",
-        "--as=1073741824",
+        "--as=1342177280",
         "--cpu=10",
         "--fsize=33554432",
         "--",
@@ -192,8 +200,8 @@ fn sandbox_command(
         "--preview-helper",
         operation.argument(),
         "/input",
-        "/output/result.png",
     ]);
+    command.arg(format!("/output/{}", operation.output_name()));
     command.arg(value.to_string());
     command
 }
