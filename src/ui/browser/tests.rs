@@ -263,6 +263,24 @@ fn paste_prefers_the_hovered_pane_then_the_deepest_pane() {
 }
 
 #[test]
+fn new_folder_prefers_the_hovered_pane_then_falls_back_safely() {
+    assert_eq!(
+        new_folder_destination_depth(Some(1), Some(0), Some(2), 3),
+        Some(1)
+    );
+    assert_eq!(
+        new_folder_destination_depth(None, Some(0), Some(2), 3),
+        Some(0)
+    );
+    assert_eq!(
+        new_folder_destination_depth(Some(4), Some(5), Some(1), 3),
+        Some(1)
+    );
+    assert_eq!(new_folder_destination_depth(None, None, None, 3), Some(2));
+    assert_eq!(new_folder_destination_depth(None, None, None, 0), None);
+}
+
+#[test]
 fn cut_clipboard_locations_match_regardless_of_order() {
     let first = Location::local("/fixture/first");
     let second = Location::local("/fixture/second");

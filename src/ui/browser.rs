@@ -520,17 +520,24 @@ impl BrowserView {
     }
 
     pub fn create_new_folder(&self) {
-        let depth = self
-            .state
-            .focused_column_depth()
-            .or_else(|| self.state.browser.active_depth());
+        let mode = self.view_mode();
+        let depth = if mode == BrowserMode::Columns {
+            new_folder_destination_depth(
+                self.state.hovered_column.get(),
+                self.state.focused_column_depth(),
+                self.state.browser.active_depth(),
+                self.state.columns.borrow().len(),
+            )
+        } else {
+            self.state.browser.active_depth()
+        };
         if let Some((depth, location)) = depth.and_then(|depth| {
             self.state
                 .browser
                 .location_at(depth)
                 .map(|location| (depth, location))
         }) {
-            if self.view_mode() == BrowserMode::Columns {
+            if mode == BrowserMode::Columns {
                 self.state.begin_new_folder(depth, location);
             } else {
                 self.state.mode_views.borrow().begin_new_folder(depth);
@@ -4577,6 +4584,19 @@ fn should_preserve_drag_selection(clicked_selected: bool, selected_count: u64) -
 fn paste_destination_depth(hovered: Option<usize>, pane_count: usize) -> Option<usize> {
     hovered
         .filter(|depth| *depth < pane_count)
+        .or_else(|| pane_count.checked_sub(1))
+}
+
+fn new_folder_destination_depth(
+    hovered: Option<usize>,
+    focused: Option<usize>,
+    active: Option<usize>,
+    pane_count: usize,
+) -> Option<usize> {
+    hovered
+        .filter(|depth| *depth < pane_count)
+        .or_else(|| focused.filter(|depth| *depth < pane_count))
+        .or_else(|| active.filter(|depth| *depth < pane_count))
         .or_else(|| pane_count.checked_sub(1))
 }
 
