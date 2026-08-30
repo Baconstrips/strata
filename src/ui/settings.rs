@@ -1,10 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use std::{cell::RefCell, rc::Rc};
+use std::{
+    cell::{Cell, RefCell},
+    rc::Rc,
+    sync::mpsc::TryRecvError,
+    time::Duration,
+};
 
-use gtk::{gdk, prelude::*};
+use gtk::{gdk, glib, prelude::*};
 
-use crate::assets::icons;
+use crate::{
+    assets::icons,
+    services::{self, UpdateCheck},
+};
 
 use super::{
     blur::BlurBin,
@@ -167,8 +175,9 @@ fn general_page(browser: &BrowserView, manager: Rc<ThemeManager>) -> gtk::Widget
         "Launch files from search instead of opening Strata's quick preview.",
         direct_open_enabled,
     );
+    let manager_for_search_open = manager.clone();
     search_open_files.connect_active_notify(move |toggle| {
-        manager.set_search_open_files_directly(toggle.is_active());
+        manager_for_search_open.set_search_open_files_directly(toggle.is_active());
     });
     preferences.append(&search_open_row);
 
@@ -180,7 +189,105 @@ fn general_page(browser: &BrowserView, manager: Rc<ThemeManager>) -> gtk::Widget
     );
     reduce_motion.connect_active_notify(|toggle| set_reduce_motion(toggle.is_active()));
     preferences.append(&motion_row);
+
+    append_heading(&preferences, "UPDATES");
+    let auto_check_enabled = manager.checks_for_updates();
+    let (auto_check_row, auto_check) = settings_option(
+        "Automatically check for updates",
+        "Check GitHub for a newer release each time settings are opened.",
+        auto_check_enabled,
+    );
+    let manager_for_updates = manager.clone();
+    auto_check.connect_active_notify(move |toggle| {
+        manager_for_updates.set_checks_for_updates(toggle.is_active());
+    });
+    preferences.append(&auto_check_row);
+    let (update_row, run_check) = update_check_row();
+    preferences.append(&update_row);
+    if auto_check_enabled {
+        run_check();
+    }
+
     preferences.upcast()
+}
+
+fn update_check_row() -> (gtk::Box, Rc<dyn Fn()>) {
+    let row = gtk::Box::new(gtk::Orientation::Horizontal, 16);
+    row.add_css_class("settings-option");
+    let copy = gtk::Box::new(gtk::Orientation::Vertical, 2);
+    copy.set_hexpand(true);
+    copy.set_valign(gtk::Align::Center);
+    let title = gtk::Label::new(Some("Check for updates"));
+    title.set_xalign(0.0);
+    title.add_css_class("settings-option-title");
+    let status = gtk::Label::new(Some(&format!("Version {}", env!("CARGO_PKG_VERSION"))));
+    status.set_xalign(0.0);
+    status.set_wrap(true);
+    status.set_use_markup(true);
+    status.add_css_class("settings-option-description");
+    copy.append(&title);
+    copy.append(&status);
+    let button = gtk::Button::with_label("Check now");
+    button.set_valign(gtk::Align::Center);
+    row.append(&copy);
+    row.append(&button);
+
+    let checking = Rc::new(Cell::new(false));
+    let run_check: Rc<dyn Fn()> = Rc::new({
+        let checking = checking.clone();
+        let status = status.clone();
+        let button = button.clone();
+        move || {
+            if checking.replace(true) {
+                return;
+            }
+            status.set_text("Checking for updates…");
+            button.set_sensitive(false);
+            let receiver = services::check_for_updates(env!("CARGO_PKG_VERSION"));
+            let checking = checking.clone();
+            let status = status.clone();
+            let button = button.clone();
+            glib::timeout_add_local(Duration::from_millis(100), move || {
+                match receiver.try_recv() {
+                    Ok(result) => {
+                        status.set_markup(&update_check_message(&result));
+                        button.set_sensitive(true);
+                        checking.set(false);
+                        glib::ControlFlow::Break
+                    }
+                    Err(TryRecvError::Empty) => glib::ControlFlow::Continue,
+                    Err(TryRecvError::Disconnected) => {
+                        status.set_text("Couldn't check for updates");
+                        button.set_sensitive(true);
+                        checking.set(false);
+                        glib::ControlFlow::Break
+                    }
+                }
+            });
+        }
+    });
+    let clicked_check = run_check.clone();
+    button.connect_clicked(move |_| clicked_check());
+    (row, run_check)
+}
+
+fn update_check_message(result: &UpdateCheck) -> String {
+    match result {
+        UpdateCheck::UpToDate => {
+            format!("Up to date — version {}", env!("CARGO_PKG_VERSION"))
+        }
+        UpdateCheck::Available { version, url } => format!(
+            "Update available: <a href=\"{}\">v{}</a>",
+            glib::markup_escape_text(url),
+            glib::markup_escape_text(version),
+        ),
+        UpdateCheck::Failed(message) => {
+            format!(
+                "Couldn't check for updates: {}",
+                glib::markup_escape_text(message)
+            )
+        }
+    }
 }
 
 fn keybindings_page() -> gtk::Widget {

@@ -4,6 +4,7 @@ mod file_source;
 mod operations;
 mod preview;
 mod search;
+mod update_check;
 
 pub use file_source::{
     DirectoryChange, DirectoryEvent, DirectoryRequest, FileSource, LoadHandle,
@@ -18,3 +19,4 @@ pub use preview::{
 };
 pub(crate) use preview::{content_family, has_plain_text_extension};
 pub(crate) use search::{SearchEvent, SearchHandle, SearchItem, index_tree};
+pub(crate) use update_check::{UpdateCheck, check_for_updates};
