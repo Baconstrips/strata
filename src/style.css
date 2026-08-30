@@ -24,7 +24,7 @@ headerbar {
 }
 
 .location-control {
-  min-width: 36em;
+  min-width: 8em;
 }
 
 headerbar .sidebar-toggle {

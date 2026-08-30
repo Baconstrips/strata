@@ -128,6 +128,16 @@ impl ModeViews {
         explorer_root.add_css_class("mode-explorer");
         explorer_root.set_hexpand(true);
         explorer_root.set_vexpand(true);
+        // Explorer columns have user-resizable fixed widths. Keep their leading edge visible when
+        // the window is narrower than their combined width, and scroll the headings and rows as
+        // one surface instead of letting the stack center and clip the oversized pane.
+        let explorer_scroll = gtk::ScrolledWindow::builder()
+            .child(&explorer_root)
+            .hscrollbar_policy(gtk::PolicyType::Automatic)
+            .vscrollbar_policy(gtk::PolicyType::Never)
+            .hexpand(true)
+            .vexpand(true)
+            .build();
 
         let stack = gtk::Stack::builder()
             .transition_type(gtk::StackTransitionType::Crossfade)
@@ -137,7 +147,7 @@ impl ModeViews {
             .build();
         stack.add_named(columns, Some("columns"));
         stack.add_named(&grid_scroll, Some("grid"));
-        stack.add_named(&explorer_root, Some("explorer"));
+        stack.add_named(&explorer_scroll, Some("explorer"));
         stack.set_visible_child_name("columns");
 
         Self {
