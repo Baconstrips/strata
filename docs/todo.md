@@ -138,7 +138,8 @@ Legend: **P0** blocks the milestone, **P1** is required for its exit criteria, *
 - [ ] **P1** Open the selection-aware file context menu from the keyboard menu key
 - [x] **P1** Preserve an existing multi-selection when right-clicking one of its selected rows; otherwise select the clicked row
 - [x] **P1** Group the available Open, Preview, Cut, Rename, Trash, and Properties actions with visible shortcuts and separators
-- [ ] **P1** Add Open With, Copy, Move To, Copy To, and permanent Delete as their underlying actions become available
+- [x] **P1** Add Move To, Copy To, Restore, and permanent Delete actions
+- [ ] **P1** Add Open With and Copy actions
 - [x] **P1** Adapt context-menu actions to single and multiple selections and disable inapplicable preview and paste actions
 - [ ] **P1** Disable or hide actions according to destination writability, clipboard operation, and provider capability
 - [x] **P1** Add a folder background menu for New Folder, Paste, Select All, and Properties
@@ -148,13 +149,16 @@ Legend: **P0** blocks the milestone, **P1** is required for its exit criteria, *
 ### Operation engine
 
 - [ ] **P0** Model queued operation lifecycle and final outcomes
-- [ ] **P0** Copy and move selected files between folders through the operation engine
+- [x] **P0** Copy and move selected files between folders through the operation engine
 - [ ] **P0** Duplicate selected files
 - [x] **P0** Trash and permanently delete selected files
+- [x] **P0** Restore selected items and empty Trash with partial-failure reporting
 - [x] **P0** Bind `Delete` and `Shift+Delete` to confirmed trash and permanent-delete actions
-- [ ] **P0** Progress reporting and cancellation
-- [ ] **P0** Conflict handling: skip, replace, rename, and apply-to-all
-- [ ] **P0** Partial-failure reporting and safe cancellation cleanup
+- [x] **P0** Progress reporting and cancellation for trash and restore operations
+- [ ] **P0** Add progress reporting and cancellation for copy and move operations
+- [x] **P0** Conflict handling: skip, replace, and apply-to-all
+- [ ] **P0** Add collision renaming
+- [ ] **P0** Generalize partial-failure reporting and safe cancellation cleanup across operations
 - [ ] **P1** Cross-device move behavior
 - [ ] **P1** Disk-full, permissions, disappearing source, and read-only tests
 - [ ] **P2** Limited undo where behavior can be guaranteed
@@ -163,7 +167,7 @@ Legend: **P0** blocks the milestone, **P1** is required for its exit criteria, *
 
 ### Desktop interoperability
 
-- [ ] **P0** Copy/cut selected files with `Ctrl+C` / `Ctrl+X`
+- [x] **P0** Copy/cut selected files with `Ctrl+C` / `Ctrl+X`
 - [x] **P0** Paste a GDK file-list clipboard into the active folder with `Ctrl+V` or the folder background menu
 - [ ] **P0** Use interoperable file-manager clipboard formats for external copy/cut/paste
 - [ ] **P0** Enable Cut/Copy based on selection and Paste based on clipboard contents and destination writability
@@ -196,6 +200,7 @@ Legend: **P0** blocks the milestone, **P1** is required for its exit criteria, *
 - [ ] **P0** Enforce preview time and concurrency budgets
 - [x] **P0** Cancel previews when selection changes
 - [x] **P0** Generic metadata and unsupported fallback
+- [x] **P1** Add a persisted option to disable automatic single-click file previews while retaining explicit preview actions
 - [ ] **P1** Freedesktop-compatible thumbnail cache
 - [ ] **P1** Isolate provider failures from navigation
 
@@ -250,9 +255,10 @@ Legend: **P0** blocks the milestone, **P1** is required for its exit criteria, *
 ### Theme system
 
 - [x] **P0** Validate semantic theme schema and fallback cascade
-- [x] **P0** Load current Omarchy theme and watch for live changes
+- [x] **P0** Load current Omarchy theme and watch for debounced live changes
 - [ ] **P0** Add generic system light/dark source
 - [x] **P1** Load user themes from XDG configuration directories
+- [x] **P1** Apply theme changes live to bundled icons and open source previews
 - [ ] **P1** Apply interface and monospace font overrides live
 - [x] **P1** Document theme format with a complete example
 - [ ] **P1** Test missing, malformed, light, and low-contrast themes
