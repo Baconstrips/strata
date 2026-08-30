@@ -12,7 +12,7 @@ use crate::{
     services::{
         CreateDirectoryRequest, DeleteRequest, DirectoryChange, DirectoryEvent, DirectoryRequest,
         FileSource, LoadHandle, LocationValidationError, OperationEvent, OperationProvider,
-        OperationRequestId, PasteRequest, RenameRequest, RequestId,
+        OperationRequestId, PasteRequest, RenameRequest, RequestId, RestoreRequest,
     },
 };
 
@@ -79,7 +79,26 @@ pub enum BrowserEvent {
     RenameFailed {
         message: String,
     },
+    DeletionStarted {
+        total: usize,
+    },
+    DeletionProgress {
+        completed: usize,
+        total: usize,
+    },
+    DeletionFinished,
+    RestorationStarted {
+        total: usize,
+    },
+    RestorationProgress {
+        completed: usize,
+        total: usize,
+    },
+    RestorationFinished,
     OperationFailed {
+        message: String,
+    },
+    OperationCompletedWithErrors {
         message: String,
     },
     NavigationRejected {
@@ -98,6 +117,8 @@ pub struct Browser {
     operation_provider: RefCell<Option<Rc<dyn OperationProvider>>>,
     operation_load: RefCell<Option<LoadHandle>>,
     current_operation: Cell<Option<OperationRequestId>>,
+    deletion_operation: Cell<bool>,
+    restoration_operation: Cell<bool>,
     next_request: Cell<u64>,
     preferences: Cell<ViewPreferences>,
     observers: RefCell<Vec<Observer>>,
@@ -114,6 +135,8 @@ impl Browser {
             operation_provider: RefCell::new(None),
             operation_load: RefCell::new(None),
             current_operation: Cell::new(None),
+            deletion_operation: Cell::new(false),
+            restoration_operation: Cell::new(false),
             next_request: Cell::new(1),
             preferences: Cell::new(ViewPreferences::default()),
             observers: RefCell::new(Vec::new()),
@@ -175,6 +198,9 @@ impl Browser {
     }
 
     pub fn navigate(self: &Rc<Self>, location: Location) {
+        if self.active_location().as_ref() == Some(&location) {
+            return;
+        }
         self.close_peek();
         self.loads.borrow_mut().clear();
         self.monitors.borrow_mut().clear();
@@ -483,15 +509,12 @@ impl Browser {
         self.operation_load.replace(Some(load));
     }
 
-    pub fn paste(self: &Rc<Self>, destination: Location, sources: Vec<Location>) {
-        self.transfer(destination, sources, false);
-    }
-
     pub fn transfer(
         self: &Rc<Self>,
         destination: Location,
         sources: Vec<Location>,
         move_sources: bool,
+        overwrite_existing: bool,
     ) {
         if sources.is_empty() {
             return;
@@ -509,6 +532,7 @@ impl Browser {
                 destination,
                 sources,
                 move_sources,
+                overwrite_existing,
             },
             self.operation_callback(request_id, false),
         );
@@ -525,7 +549,12 @@ impl Browser {
             });
             return;
         };
+        let total = entries.len();
         let request_id = self.begin_operation();
+        self.deletion_operation.set(true);
+        if total > 1 {
+            self.emit(BrowserEvent::DeletionStarted { total });
+        }
         let load = provider.delete(
             DeleteRequest {
                 id: request_id,
@@ -537,8 +566,52 @@ impl Browser {
         self.operation_load.replace(Some(load));
     }
 
+    pub fn restore(self: &Rc<Self>, entries: Vec<FileEntry>) {
+        if entries.is_empty() {
+            return;
+        }
+        let Some(provider) = self.operation_provider.borrow().clone() else {
+            self.emit(BrowserEvent::OperationFailed {
+                message: "File operations are unavailable".to_owned(),
+            });
+            return;
+        };
+        let total = entries.len();
+        let request_id = self.begin_operation();
+        self.restoration_operation.set(true);
+        if total > 1 {
+            self.emit(BrowserEvent::RestorationStarted { total });
+        }
+        let load = provider.restore(
+            RestoreRequest {
+                id: request_id,
+                entries,
+            },
+            self.operation_callback(request_id, false),
+        );
+        self.operation_load.replace(Some(load));
+    }
+
+    pub fn cancel_file_operation(&self) {
+        let deleting = self.deletion_operation.replace(false);
+        let restoring = self.restoration_operation.replace(false);
+        if !deleting && !restoring {
+            return;
+        }
+        self.current_operation.set(None);
+        self.operation_load.borrow_mut().take();
+        if deleting {
+            self.emit(BrowserEvent::DeletionFinished);
+        }
+        if restoring {
+            self.emit(BrowserEvent::RestorationFinished);
+        }
+    }
+
     fn begin_operation(&self) -> OperationRequestId {
         self.operation_load.borrow_mut().take();
+        self.deletion_operation.set(false);
+        self.restoration_operation.set(false);
         let request_id = OperationRequestId(self.next_request.get());
         self.next_request
             .set(self.next_request.get().saturating_add(1));
@@ -560,13 +633,60 @@ impl Browser {
                 OperationEvent::Renamed { request_id }
                 | OperationEvent::Created { request_id }
                 | OperationEvent::Pasted { request_id }
-                | OperationEvent::Deleted { request_id }
+                | OperationEvent::DeleteProgress { request_id, .. }
+                | OperationEvent::RestoreProgress { request_id, .. }
+                | OperationEvent::Deleted { request_id, .. }
+                | OperationEvent::CompletedWithErrors { request_id, .. }
+                | OperationEvent::Restored { request_id, .. }
+                | OperationEvent::RestoreCompletedWithErrors { request_id, .. }
                 | OperationEvent::Failed { request_id, .. } => *request_id,
             };
             if event_id != request_id || browser.current_operation.get() != Some(event_id) {
                 return;
             }
+            if let OperationEvent::DeleteProgress {
+                completed,
+                total,
+                deleted_location,
+                ..
+            } = &event
+            {
+                if let Some(location) = deleted_location {
+                    browser.remove_deleted_locations(std::slice::from_ref(location));
+                }
+                if *total > 1 {
+                    browser.emit(BrowserEvent::DeletionProgress {
+                        completed: *completed,
+                        total: *total,
+                    });
+                }
+                return;
+            }
+            if let OperationEvent::RestoreProgress {
+                completed,
+                total,
+                restored_location,
+                ..
+            } = &event
+            {
+                if let Some(location) = restored_location {
+                    browser.remove_deleted_locations(std::slice::from_ref(location));
+                }
+                if *total > 1 {
+                    browser.emit(BrowserEvent::RestorationProgress {
+                        completed: *completed,
+                        total: *total,
+                    });
+                }
+                return;
+            }
             browser.current_operation.set(None);
+            if browser.deletion_operation.replace(false) {
+                browser.emit(BrowserEvent::DeletionFinished);
+            }
+            if browser.restoration_operation.replace(false) {
+                browser.emit(BrowserEvent::RestorationFinished);
+            }
             browser.operation_load.borrow_mut().take();
             match event {
                 OperationEvent::Failed { message, .. } if rename => {
@@ -575,10 +695,31 @@ impl Browser {
                 OperationEvent::Failed { message, .. } => {
                     browser.emit(BrowserEvent::OperationFailed { message });
                 }
+                OperationEvent::CompletedWithErrors {
+                    deleted_locations,
+                    message,
+                    ..
+                } => {
+                    browser.remove_deleted_locations(&deleted_locations);
+                    browser.emit(BrowserEvent::OperationCompletedWithErrors { message });
+                }
+                OperationEvent::Deleted { locations, .. }
+                | OperationEvent::Restored { locations, .. } => {
+                    browser.remove_deleted_locations(&locations);
+                }
+                OperationEvent::RestoreCompletedWithErrors {
+                    restored_locations,
+                    message,
+                    ..
+                } => {
+                    browser.remove_deleted_locations(&restored_locations);
+                    browser.emit(BrowserEvent::OperationCompletedWithErrors { message });
+                }
                 OperationEvent::Renamed { .. } => browser.emit(BrowserEvent::RenameCompleted),
                 OperationEvent::Created { .. }
                 | OperationEvent::Pasted { .. }
-                | OperationEvent::Deleted { .. } => {}
+                | OperationEvent::DeleteProgress { .. }
+                | OperationEvent::RestoreProgress { .. } => {}
             }
         })
     }
@@ -716,6 +857,33 @@ impl Browser {
         )
     }
 
+    fn remove_deleted_locations(self: &Rc<Self>, locations: &[Location]) {
+        for location in locations {
+            let Some(parent) = deletion_parent_location(location) else {
+                continue;
+            };
+            let depths = {
+                let state = self.state.borrow();
+                let mut depths = Vec::new();
+                let mut depth = 0;
+                while let Some(open_location) = state.location_at(depth) {
+                    if open_location == parent {
+                        depths.push(depth);
+                    }
+                    depth += 1;
+                }
+                depths
+            };
+            for depth in depths {
+                self.handle_directory_change(
+                    depth,
+                    &parent,
+                    DirectoryChange::Remove(location.clone()),
+                );
+            }
+        }
+    }
+
     pub fn retry_column(self: &Rc<Self>, depth: usize) {
         self.refresh_column(depth);
     }
@@ -841,6 +1009,17 @@ impl Browser {
         let id = self.next_request.get();
         self.next_request.set(id.saturating_add(1));
         RequestId(id)
+    }
+}
+
+fn deletion_parent_location(location: &Location) -> Option<Location> {
+    if location
+        .uri_value()
+        .is_some_and(|uri| uri.starts_with("trash:"))
+    {
+        Some(Location::uri("trash:///"))
+    } else {
+        location.parent()
     }
 }
 

@@ -360,6 +360,33 @@ headerbar menubutton.header-action > button:focus-visible image {
   font-size: 0.82em;
 }
 
+.collision-apply-all {
+  color: @theme_text;
+  padding-top: 2px;
+}
+
+.collision-apply-all check {
+  background: alpha(@theme_bg, 0.72);
+  border: 1px solid alpha(@theme_border, 0.72);
+  border-radius: 4px;
+  color: @theme_bg;
+}
+
+.collision-apply-all:hover check {
+  border-color: @theme_accent;
+}
+
+.collision-apply-all:checked check {
+  background: @theme_accent;
+  border-color: @theme_accent;
+  color: @theme_bg;
+}
+
+.collision-apply-all:focus-visible {
+  outline: 2px solid alpha(@theme_accent, 0.5);
+  outline-offset: 2px;
+}
+
 .delete-confirmation-actions {
   border-top: 1px solid alpha(@theme_border, 0.22);
   padding: 10px 20px 12px;
@@ -848,6 +875,227 @@ menubutton.column-header-action > button:focus-visible image {
   color: @theme_text;
 }
 
+.transfer-dialog {
+  background: @theme_surface;
+  border: 1px solid alpha(@theme_accent, 0.34);
+  border-radius: 7px;
+  box-shadow: 0 18px 54px alpha(@theme_bg, 0.76);
+  color: @theme_text;
+  min-width: 500px;
+}
+
+.transfer-header {
+  border-bottom: 1px solid alpha(@theme_border, 0.28);
+  padding: 14px 18px;
+}
+
+.transfer-symbol {
+  background: alpha(@theme_highlight, 0.64);
+  border: 1px solid alpha(@theme_accent, 0.24);
+  border-radius: 6px;
+  min-height: 40px;
+  min-width: 40px;
+}
+
+.transfer-title {
+  color: @theme_text;
+  font-size: 1.08em;
+  font-weight: 700;
+}
+
+.transfer-subtitle,
+.transfer-field-label {
+  color: @theme_dim_text;
+}
+
+.transfer-subtitle {
+  font-size: 0.82em;
+}
+
+.transfer-close {
+  background: transparent;
+  border: none;
+  border-radius: 5px;
+  box-shadow: none;
+  color: @theme_dim_text;
+  min-height: 28px;
+  min-width: 28px;
+  padding: 4px;
+}
+
+.transfer-close:hover {
+  background: alpha(@theme_muted, 0.56);
+  color: @theme_text;
+}
+
+.transfer-close:active {
+  background: alpha(@theme_muted, 0.78);
+  color: @theme_accent;
+}
+
+.transfer-close:focus-visible {
+  outline: 2px solid alpha(@theme_accent, 0.52);
+  outline-offset: 1px;
+}
+
+.transfer-body {
+  padding: 18px 20px 16px;
+}
+
+.transfer-field-label {
+  font-size: 0.76em;
+  font-weight: 700;
+}
+
+.transfer-field {
+  background: alpha(@theme_bg, 0.72);
+  border: 1px solid alpha(@theme_border, 0.54);
+  border-radius: 5px;
+  color: @theme_text;
+  min-height: 34px;
+  padding: 3px 9px;
+}
+
+.transfer-field:focus {
+  border-color: @theme_accent;
+  box-shadow: 0 0 0 1px alpha(@theme_accent, 0.42);
+}
+
+.transfer-field.error {
+  border-color: @theme_danger;
+  box-shadow: 0 0 0 1px alpha(@theme_danger, 0.4);
+}
+
+.transfer-suggestion-scroll,
+.transfer-suggestion-scroll viewport {
+  background: transparent;
+}
+
+.transfer-suggestions {
+  background: alpha(@theme_bg, 0.38);
+  border: 1px solid alpha(@theme_border, 0.28);
+  border-radius: 5px;
+  padding: 4px;
+}
+
+.transfer-suggestions-empty {
+  color: @theme_dim_text;
+  font-size: 0.86em;
+  padding: 8px 9px;
+}
+
+.transfer-suggestion {
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  box-shadow: none;
+  color: @theme_text;
+  min-height: 30px;
+  padding: 3px 7px;
+}
+
+.transfer-suggestion:hover,
+.transfer-suggestion:focus-visible {
+  background: alpha(@theme_highlight, 0.72);
+  color: @theme_accent;
+  outline: none;
+}
+
+.transfer-suggestion:active {
+  background: alpha(@theme_muted, 0.8);
+  color: @theme_accent;
+}
+
+.transfer-error,
+.transfer-warning {
+  border-radius: 5px;
+  font-size: 0.82em;
+  padding: 7px 9px;
+}
+
+.transfer-error {
+  background: alpha(@theme_danger, 0.1);
+  border: 1px solid alpha(@theme_danger, 0.5);
+  color: @theme_danger;
+}
+
+.transfer-warning {
+  background: alpha(@theme_accent, 0.1);
+  border: 1px solid alpha(@theme_accent, 0.46);
+  color: @theme_accent;
+}
+
+.delete-progress-dialog {
+  min-width: 440px;
+}
+
+.delete-progress-status {
+  color: @theme_dim_text;
+}
+
+.delete-progress-bar trough {
+  background: alpha(@theme_bg, 0.72);
+  border: 1px solid alpha(@theme_border, 0.42);
+  border-radius: 5px;
+  min-height: 8px;
+}
+
+.delete-progress-bar progress {
+  background: @theme_accent;
+  border: none;
+  border-radius: 4px;
+  min-height: 8px;
+}
+
+.transfer-actions {
+  border-top: 1px solid alpha(@theme_border, 0.28);
+  padding: 11px 20px 13px;
+}
+
+.transfer-actions button {
+  border-radius: 5px;
+  box-shadow: none;
+  min-height: 28px;
+  padding: 3px 12px;
+}
+
+.transfer-cancel {
+  background: transparent;
+  border: 1px solid alpha(@theme_border, 0.54);
+  color: @theme_text;
+}
+
+.transfer-cancel:hover {
+  background: alpha(@theme_muted, 0.62);
+  border-color: @theme_text;
+}
+
+.transfer-cancel:active {
+  background: alpha(@theme_muted, 0.82);
+  border-color: @theme_accent;
+  color: @theme_accent;
+}
+
+.transfer-confirm {
+  background: alpha(@theme_accent, 0.14);
+  border: 1px solid @theme_accent;
+  color: @theme_accent;
+}
+
+.transfer-confirm:hover {
+  background: alpha(@theme_accent, 0.22);
+}
+
+.transfer-confirm:active {
+  background: alpha(@theme_accent, 0.32);
+}
+
+.transfer-cancel:focus-visible,
+.transfer-confirm:focus-visible {
+  outline: 2px solid alpha(@theme_accent, 0.5);
+  outline-offset: 1px;
+}
+
 .properties-dialog {
   background: @theme_surface;
   border: 1px solid alpha(@theme_accent, 0.36);
@@ -1192,6 +1440,10 @@ menubutton.column-header-action > button:focus-visible image {
   border-radius: 6px;
   color: @theme_text;
   padding: 4px;
+}
+
+.file-row.cut {
+  opacity: 0.45;
 }
 
 .file-row.dragging {

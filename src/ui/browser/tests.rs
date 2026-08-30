@@ -40,6 +40,35 @@ fn delete_confirmation_labels_distinguish_files_and_folders() {
 }
 
 #[test]
+fn quick_preview_is_offered_only_for_supported_files() {
+    let entry = |name: &str, kind| FileEntry {
+        location: Location::local(format!("/fixture/{name}")),
+        native_name: name.into(),
+        display_name: name.into(),
+        kind,
+        size: crate::model::MetadataValue::Unknown,
+        modified_unix_seconds: crate::model::MetadataValue::Unknown,
+    };
+
+    assert!(entry_supports_quick_preview(&entry(
+        "photo.png",
+        crate::model::EntryKind::File,
+    )));
+    assert!(entry_supports_quick_preview(&entry(
+        "notes.txt",
+        crate::model::EntryKind::FileSymbolicLink,
+    )));
+    assert!(!entry_supports_quick_preview(&entry(
+        "archive.zip",
+        crate::model::EntryKind::File,
+    )));
+    assert!(!entry_supports_quick_preview(&entry(
+        "photos.png",
+        crate::model::EntryKind::Directory,
+    )));
+}
+
+#[test]
 fn multi_selection_summary_lists_at_most_three_names() {
     let entry = |name: &str| FileEntry {
         location: Location::local(format!("/fixture/{name}")),
@@ -67,6 +96,68 @@ fn trash_locations_include_the_root_and_descendants() {
     assert!(!is_trash_location(&Location::local(
         "/home/example/.local/share/Trash"
     )));
+}
+
+#[test]
+fn transfer_collisions_detect_existing_destination_items() -> Result<(), Box<dyn std::error::Error>>
+{
+    let root = std::env::temp_dir().join(format!("strata-collision-test-{}", std::process::id()));
+    let _ignored = std::fs::remove_dir_all(&root);
+    let source_dir = root.join("source");
+    let destination = root.join("destination");
+    std::fs::create_dir_all(&source_dir)?;
+    std::fs::create_dir_all(&destination)?;
+    let source = source_dir.join("photo.jpg");
+    std::fs::write(&source, b"new")?;
+
+    assert!(!transfer_has_collision(
+        &Location::local(&source),
+        &Location::local(&destination)
+    ));
+    std::fs::write(destination.join("photo.jpg"), b"old")?;
+    assert!(transfer_has_collision(
+        &Location::local(&source),
+        &Location::local(&destination)
+    ));
+
+    std::fs::remove_dir_all(root)?;
+    Ok(())
+}
+
+#[test]
+fn destination_paths_expand_home_and_relative_input() {
+    let base = std::path::Path::new("/work/current");
+    let home = std::path::Path::new("/home/example");
+
+    assert_eq!(resolve_destination_path("~", base, home), home);
+    assert_eq!(
+        resolve_destination_path("~/Documents", base, home),
+        home.join("Documents")
+    );
+    assert_eq!(
+        resolve_destination_path("../Archive", base, home),
+        base.join("../Archive")
+    );
+    assert_eq!(
+        resolve_destination_path("/tmp/export", base, home),
+        std::path::Path::new("/tmp/export")
+    );
+}
+
+#[test]
+fn directory_autocomplete_suggests_only_matching_folders() -> Result<(), Box<dyn std::error::Error>>
+{
+    let root = std::env::temp_dir().join(format!("strata-path-suggestions-{}", std::process::id()));
+    let _ignored = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(root.join("Documents"))?;
+    std::fs::create_dir_all(root.join("Downloads"))?;
+    std::fs::write(root.join("Document.txt"), b"not a folder")?;
+
+    let suggestions = directory_suggestions(&format!("{}/Doc", root.display()), &root, &root);
+
+    assert_eq!(suggestions, vec![root.join("Documents")]);
+    std::fs::remove_dir_all(root)?;
+    Ok(())
 }
 
 #[test]
@@ -101,6 +192,38 @@ fn file_names_map_to_specific_lucide_icons() {
         crate::assets::icons::FILE_ARCHIVE
     );
     assert_eq!(icon_for_name("README.md"), crate::assets::icons::DOCUMENTS);
+}
+
+#[test]
+fn pressing_an_item_in_a_multi_selection_preserves_the_drag_group() {
+    assert!(should_preserve_drag_selection(true, 2));
+    assert!(should_preserve_drag_selection(true, 8));
+    assert!(!should_preserve_drag_selection(true, 1));
+    assert!(!should_preserve_drag_selection(false, 4));
+}
+
+#[test]
+fn paste_prefers_the_hovered_pane_then_the_deepest_pane() {
+    assert_eq!(paste_destination_depth(Some(1), 3), Some(1));
+    assert_eq!(paste_destination_depth(None, 3), Some(2));
+    assert_eq!(paste_destination_depth(Some(4), 3), Some(2));
+    assert_eq!(paste_destination_depth(None, 0), None);
+}
+
+#[test]
+fn cut_clipboard_locations_match_regardless_of_order() {
+    let first = Location::local("/fixture/first");
+    let second = Location::local("/fixture/second");
+
+    assert!(same_locations(
+        &[first.clone(), second.clone()],
+        &[second, first]
+    ));
+    assert!(!same_locations(&[], &[]));
+    assert!(!same_locations(
+        &[Location::local("/fixture/first")],
+        &[Location::local("/fixture/other")]
+    ));
 }
 
 #[test]

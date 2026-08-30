@@ -273,8 +273,21 @@ impl NavigationState {
                 insert_monitored_entry(&mut column.entries, entry, preferences, &mut splices);
             }
             DirectoryChange::Remove(location) => {
+                let removed_position = column
+                    .entries
+                    .iter()
+                    .position(|entry| entry.location == location);
+                let selected_was_removed = selected_location.as_ref() == Some(&location);
                 column.selected_locations.remove(&location);
                 remove_monitored_entry(&mut column.entries, &location, &mut splices);
+                if selected_was_removed {
+                    selected_location = removed_position.and_then(|position| {
+                        column
+                            .entries
+                            .get(position.min(column.entries.len().saturating_sub(1)))
+                            .map(|entry| entry.location.clone())
+                    });
+                }
             }
             DirectoryChange::Move { from, entry } => {
                 if selected_location.as_ref() == Some(&from) {

@@ -11,7 +11,7 @@ use crate::{
     model::Location,
     services::{
         CreateDirectoryRequest, DeleteRequest, LoadHandle, OperationEvent, OperationProvider,
-        PasteRequest, RenameRequest,
+        PasteRequest, RenameRequest, RestoreRequest,
     },
 };
 
@@ -22,9 +22,14 @@ fn gio_file(location: &Location) -> gio::File {
         .unwrap_or_else(|| gio::File::for_uri(location.uri_value().unwrap_or_default()))
 }
 
+fn transfer_is_noop(source: &gio::File, destination: &gio::File, target: &gio::File) -> bool {
+    source.equal(target) || source.equal(destination) || destination.has_prefix(source)
+}
+
 fn copy_recursively(
     source: gio::File,
     target: gio::File,
+    overwrite_existing: bool,
 ) -> Pin<Box<dyn Future<Output = Result<(), glib::Error>>>> {
     Box::pin(async move {
         let info = source
@@ -35,9 +40,11 @@ fn copy_recursively(
             )
             .await?;
         if info.file_type() == gio::FileType::Directory {
-            target
-                .make_directory_future(glib::Priority::DEFAULT)
-                .await?;
+            if !overwrite_existing || !target.query_exists(None::<&gio::Cancellable>) {
+                target
+                    .make_directory_future(glib::Priority::DEFAULT)
+                    .await?;
+            }
             let enumerator = source
                 .enumerate_children_future(
                     "standard::name",
@@ -53,17 +60,24 @@ fn copy_recursively(
                     break;
                 }
                 for child in children {
-                    copy_recursively(source.child(child.name()), target.child(child.name()))
-                        .await?;
+                    copy_recursively(
+                        source.child(child.name()),
+                        target.child(child.name()),
+                        overwrite_existing,
+                    )
+                    .await?;
                 }
             }
             Ok(())
         } else {
-            let (copy, _progress) = source.copy_future(
-                &target,
-                gio::FileCopyFlags::ALL_METADATA | gio::FileCopyFlags::NOFOLLOW_SYMLINKS,
-                glib::Priority::DEFAULT,
-            );
+            let flags = gio::FileCopyFlags::ALL_METADATA
+                | gio::FileCopyFlags::NOFOLLOW_SYMLINKS
+                | if overwrite_existing {
+                    gio::FileCopyFlags::OVERWRITE
+                } else {
+                    gio::FileCopyFlags::NONE
+                };
+            let (copy, _progress) = source.copy_future(&target, flags, glib::Priority::DEFAULT);
             copy.await
         }
     })
@@ -100,6 +114,29 @@ fn permanently_delete(
         }
         file.delete_future(glib::Priority::DEFAULT).await
     })
+}
+
+fn operation_error_summary(errors: &[String], action: &str) -> String {
+    let mut summary = format!(
+        "{} could not be {action}. The remaining items were processed.",
+        if errors.len() == 1 {
+            "1 item".to_owned()
+        } else {
+            format!("{} items", errors.len())
+        }
+    );
+    for error in errors.iter().take(8) {
+        summary.push_str("\n\n• ");
+        summary.push_str(error);
+    }
+    if errors.len() > 8 {
+        summary.push_str(&format!("\n\n…and {} more", errors.len() - 8));
+    }
+    summary
+}
+
+fn deletion_error_summary(errors: &[String]) -> String {
+    operation_error_summary(errors, "deleted")
 }
 
 #[derive(Default)]
@@ -165,25 +202,49 @@ impl OperationProvider for LocalOperationProvider {
                     return;
                 };
                 let target = destination.child(name);
-                if source.equal(&target)
-                    || source.equal(&destination)
-                    || destination.has_prefix(&source)
-                {
-                    emit(OperationEvent::Failed {
-                        request_id: request.id,
-                        message: "A file or folder cannot be transferred into itself".to_owned(),
-                    });
-                    return;
+                if transfer_is_noop(&source, &destination, &target) {
+                    continue;
                 }
+                if request.overwrite_existing && target.query_exists(None::<&gio::Cancellable>) {
+                    let target_type = target
+                        .query_info_future(
+                            "standard::type",
+                            gio::FileQueryInfoFlags::NOFOLLOW_SYMLINKS,
+                            glib::Priority::DEFAULT,
+                        )
+                        .await
+                        .map(|info| info.file_type());
+                    let result = match target_type {
+                        Ok(file_type) => {
+                            permanently_delete(
+                                target.clone(),
+                                file_type == gio::FileType::Directory,
+                            )
+                            .await
+                        }
+                        Err(error) => Err(error),
+                    };
+                    if let Err(error) = result {
+                        emit(OperationEvent::Failed {
+                            request_id: request.id,
+                            message: error.to_string(),
+                        });
+                        return;
+                    }
+                }
+                let flags = gio::FileCopyFlags::ALL_METADATA
+                    | gio::FileCopyFlags::NOFOLLOW_SYMLINKS
+                    | if request.overwrite_existing {
+                        gio::FileCopyFlags::OVERWRITE
+                    } else {
+                        gio::FileCopyFlags::NONE
+                    };
                 let result = if request.move_sources {
-                    let (transfer, _progress) = source.move_future(
-                        &target,
-                        gio::FileCopyFlags::ALL_METADATA | gio::FileCopyFlags::NOFOLLOW_SYMLINKS,
-                        glib::Priority::DEFAULT,
-                    );
+                    let (transfer, _progress) =
+                        source.move_future(&target, flags, glib::Priority::DEFAULT);
                     transfer.await
                 } else {
-                    copy_recursively(source, target).await
+                    copy_recursively(source, target, request.overwrite_existing).await
                 };
                 if let Err(error) = result {
                     emit(OperationEvent::Failed {
@@ -202,24 +263,114 @@ impl OperationProvider for LocalOperationProvider {
 
     fn delete(&self, request: DeleteRequest, emit: Rc<dyn Fn(OperationEvent)>) -> LoadHandle {
         let task = glib::MainContext::default().spawn_local(async move {
-            for entry in &request.entries {
+            let mut errors = Vec::new();
+            let mut deleted_locations = Vec::new();
+            let total = request.entries.len();
+            for (index, entry) in request.entries.iter().enumerate() {
                 let file = gio_file(&entry.location);
                 let result = if request.permanent {
-                    permanently_delete(file, entry.is_directory()).await
+                    if entry
+                        .location
+                        .uri_value()
+                        .is_some_and(|uri| uri.starts_with("trash:"))
+                    {
+                        file.delete_future(glib::Priority::DEFAULT).await
+                    } else {
+                        permanently_delete(file, entry.is_directory()).await
+                    }
                 } else {
                     file.trash_future(glib::Priority::DEFAULT).await
                 };
-                if let Err(error) = result {
-                    emit(OperationEvent::Failed {
-                        request_id: request.id,
-                        message: format!("{}: {error}", entry.display_name),
-                    });
-                    return;
-                }
+                let deleted_location = if let Err(error) = result {
+                    errors.push(format!("{}: {error}", entry.display_name));
+                    None
+                } else {
+                    deleted_locations.push(entry.location.clone());
+                    Some(entry.location.clone())
+                };
+                emit(OperationEvent::DeleteProgress {
+                    request_id: request.id,
+                    completed: index + 1,
+                    total,
+                    deleted_location,
+                });
             }
-            emit(OperationEvent::Deleted {
-                request_id: request.id,
-            });
+            if errors.is_empty() {
+                emit(OperationEvent::Deleted {
+                    request_id: request.id,
+                    locations: deleted_locations,
+                });
+            } else {
+                emit(OperationEvent::CompletedWithErrors {
+                    request_id: request.id,
+                    deleted_locations,
+                    message: deletion_error_summary(&errors),
+                });
+            }
+        });
+        LoadHandle::new(move || task.abort())
+    }
+
+    fn restore(&self, request: RestoreRequest, emit: Rc<dyn Fn(OperationEvent)>) -> LoadHandle {
+        let task = glib::MainContext::default().spawn_local(async move {
+            let total = request.entries.len();
+            let mut errors = Vec::new();
+            let mut restored_locations = Vec::new();
+            for (index, entry) in request.entries.iter().enumerate() {
+                let source = gio_file(&entry.location);
+                let result = match source
+                    .query_info_future(
+                        "trash::orig-path",
+                        gio::FileQueryInfoFlags::NONE,
+                        glib::Priority::DEFAULT,
+                    )
+                    .await
+                {
+                    Ok(info) => match info.attribute_byte_string("trash::orig-path") {
+                        Some(original_path) => {
+                            let target =
+                                gio::File::for_path(std::path::Path::new(original_path.as_str()));
+                            let (restore, _progress) = source.move_future(
+                                &target,
+                                gio::FileCopyFlags::ALL_METADATA
+                                    | gio::FileCopyFlags::NOFOLLOW_SYMLINKS,
+                                glib::Priority::DEFAULT,
+                            );
+                            restore.await
+                        }
+                        None => Err(glib::Error::new(
+                            gio::IOErrorEnum::NotFound,
+                            "The original location is unavailable",
+                        )),
+                    },
+                    Err(error) => Err(error),
+                };
+                let restored_location = if let Err(error) = result {
+                    errors.push(format!("{}: {error}", entry.display_name));
+                    None
+                } else {
+                    restored_locations.push(entry.location.clone());
+                    Some(entry.location.clone())
+                };
+                emit(OperationEvent::RestoreProgress {
+                    request_id: request.id,
+                    completed: index + 1,
+                    total,
+                    restored_location,
+                });
+            }
+            if errors.is_empty() {
+                emit(OperationEvent::Restored {
+                    request_id: request.id,
+                    locations: restored_locations,
+                });
+            } else {
+                emit(OperationEvent::RestoreCompletedWithErrors {
+                    request_id: request.id,
+                    restored_locations,
+                    message: operation_error_summary(&errors, "restored"),
+                });
+            }
         });
         LoadHandle::new(move || task.abort())
     }

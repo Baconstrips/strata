@@ -118,7 +118,7 @@ pub fn present_location(application: &gtk::Application, location: Option<PathBuf
     content.set_resize_start_child(false);
     content.set_position(SIDEBAR_WIDTH);
     content.set_vexpand(true);
-    let sidebar = build_sidebar(browser.browser());
+    let sidebar = build_sidebar(browser.clone());
     sidebar.widget.set_size_request(MIN_SIDEBAR_WIDTH, -1);
     content.set_start_child(Some(&sidebar.widget));
     content.set_end_child(Some(&browser.widget()));
@@ -329,6 +329,22 @@ fn install_keyboard_navigation(
             view.paste();
             return glib::Propagation::Stop;
         }
+        if control && !shift && key == gtk::gdk::Key::c {
+            if view.filter_has_focus() {
+                return glib::Propagation::Proceed;
+            }
+            if view.copy_selection() {
+                return glib::Propagation::Stop;
+            }
+        }
+        if control && !shift && key == gtk::gdk::Key::x {
+            if view.filter_has_focus() {
+                return glib::Propagation::Proceed;
+            }
+            if view.cut_selection() {
+                return glib::Propagation::Stop;
+            }
+        }
         if control && !shift && key == gtk::gdk::Key::a {
             if view.filter_has_focus() {
                 return glib::Propagation::Proceed;
@@ -519,6 +535,7 @@ fn append_menu_heading(container: &gtk::Box, text: &str) {
 
 struct SidebarState {
     widget: gtk::Box,
+    view: BrowserView,
     browser: Rc<Browser>,
     volume_monitor: gio::VolumeMonitor,
     place_order: RefCell<Vec<&'static str>>,
@@ -551,11 +568,7 @@ impl SidebarState {
             "Home",
             Location::local(home_directory()),
         );
-        self.append_place(
-            crate::assets::icons::TRASH,
-            "Trash",
-            Location::uri("trash:///"),
-        );
+        self.append_trash_place();
         self.append_separator();
 
         for place in self.place_order.borrow().clone() {
@@ -614,6 +627,74 @@ impl SidebarState {
                 row.remove_css_class("active");
             }
         }
+    }
+
+    fn append_trash_place(self: &Rc<Self>) {
+        let location = Location::uri("trash:///");
+        let row = sidebar_button(crate::assets::icons::TRASH, "Trash");
+        row.set_tooltip_text(Some("trash:///"));
+        self.place_rows
+            .borrow_mut()
+            .push((location.clone(), row.clone()));
+        let weak_browser = Rc::downgrade(&self.browser);
+        let sidebar = self.widget.clone();
+        let selected_row = row.clone();
+        row.connect_clicked(move |_| {
+            select_sidebar_row(&sidebar, &selected_row);
+            if let Some(browser) = weak_browser.upgrade() {
+                browser.navigate(location.clone());
+            }
+        });
+
+        let menu = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        menu.add_css_class("folder-context-menu");
+        let properties = sidebar_context_option(crate::assets::icons::INFO, "Properties", false);
+        let empty = sidebar_context_option(crate::assets::icons::TRASH, "Empty Trash…", true);
+        empty.add_css_class("danger");
+        menu.append(&properties);
+        menu.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
+        menu.append(&empty);
+        let popover = gtk::Popover::builder()
+            .child(&menu)
+            .autohide(true)
+            .has_arrow(false)
+            .build();
+        popover.add_css_class("folder-context-popover");
+        popover.set_parent(&row);
+        let properties_popover = popover.downgrade();
+        let properties_view = self.view.clone();
+        properties.connect_clicked(move |_| {
+            if let Some(popover) = properties_popover.upgrade() {
+                popover.popdown();
+            }
+            properties_view.show_location_properties(&Location::uri("trash:///"));
+        });
+        let empty_popover = popover.downgrade();
+        let empty_view = self.view.clone();
+        empty.connect_clicked(move |_| {
+            if let Some(popover) = empty_popover.upgrade() {
+                popover.popdown();
+            }
+            empty_view.confirm_empty_trash();
+        });
+        let context = gtk::GestureClick::new();
+        context.set_button(3);
+        let weak_popover = popover.downgrade();
+        context.connect_pressed(move |gesture, _, x, y| {
+            gesture.set_state(gtk::EventSequenceState::Claimed);
+            let Some(popover) = weak_popover.upgrade() else {
+                return;
+            };
+            popover.set_pointing_to(Some(&gtk::gdk::Rectangle::new(
+                x.round() as i32,
+                y.round() as i32,
+                1,
+                1,
+            )));
+            popover.popup();
+        });
+        row.add_controller(context);
+        self.widget.append(&row);
     }
 
     fn append_reorderable_place(
@@ -824,6 +905,25 @@ fn standard_place(id: &str) -> Option<(&'static str, &'static str, glib::UserDir
     }
 }
 
+fn sidebar_context_option(icon: &str, label: &str, danger: bool) -> gtk::Button {
+    let button = gtk::Button::new();
+    button.add_css_class("item-context-option");
+    let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    let icon = if danger {
+        crate::assets::danger_icon(icon, 15)
+    } else {
+        crate::assets::primary_icon(icon, 15)
+    };
+    icon.add_css_class("item-context-icon");
+    let label = gtk::Label::new(Some(label));
+    label.set_xalign(0.0);
+    label.set_hexpand(true);
+    row.append(&icon);
+    row.append(&label);
+    button.set_child(Some(&row));
+    button
+}
+
 fn sidebar_button(icon: &str, name: &str) -> gtk::Button {
     let content = gtk::Box::new(gtk::Orientation::Horizontal, 8);
     let image = crate::assets::primary_icon(icon, 17);
@@ -851,7 +951,7 @@ fn navigate_to_gio_file(browser: &Rc<Browser>, file: &gio::File) {
     browser.navigate(location);
 }
 
-fn build_sidebar(browser: Rc<Browser>) -> SidebarView {
+fn build_sidebar(view: BrowserView) -> SidebarView {
     let widget = gtk::Box::new(gtk::Orientation::Vertical, 2);
     widget.add_css_class("sidebar");
     let scroller = gtk::ScrolledWindow::builder()
@@ -864,7 +964,8 @@ fn build_sidebar(browser: Rc<Browser>) -> SidebarView {
     let volume_monitor = gio::VolumeMonitor::get();
     let state = Rc::new(SidebarState {
         widget,
-        browser,
+        browser: view.browser(),
+        view,
         volume_monitor,
         place_order: RefCell::new(vec![
             "desktop",

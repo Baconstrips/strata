@@ -9,6 +9,23 @@ use crate::{
 };
 
 #[test]
+fn deleted_trash_entries_refresh_the_trash_root() {
+    let entry = FileEntry {
+        location: Location::uri("trash:///photo.jpg"),
+        native_name: "photo.jpg".into(),
+        display_name: "photo.jpg".into(),
+        kind: EntryKind::File,
+        size: MetadataValue::Known(10),
+        modified_unix_seconds: MetadataValue::Unknown,
+    };
+
+    assert_eq!(
+        deletion_parent_location(&entry.location),
+        Some(Location::uri("trash:///"))
+    );
+}
+
+#[test]
 fn rename_validation_rejects_empty_reserved_and_nested_names() {
     assert!(validate_rename("").is_err());
     assert!(validate_rename(".").is_err());
@@ -349,6 +366,51 @@ fn navigating_away_cancels_the_previous_directory_request() {
     browser.navigate(Location::local("/second"));
 
     assert_eq!(cancellations.get(), 1);
+}
+
+#[test]
+fn navigating_to_the_active_location_is_a_noop() {
+    let cancellations = Rc::new(Cell::new(0));
+    let browser = Browser::new(Rc::new(TrackingFileSource {
+        cancellations: cancellations.clone(),
+    }));
+    let resets = Rc::new(Cell::new(0));
+    let observed_resets = resets.clone();
+    browser.observe(move |event| {
+        if matches!(event, BrowserEvent::Reset) {
+            observed_resets.set(observed_resets.get() + 1);
+        }
+    });
+
+    browser.navigate(Location::uri("trash:///"));
+    browser.navigate(Location::uri("trash:///"));
+
+    assert_eq!(cancellations.get(), 0);
+    assert_eq!(resets.get(), 1);
+}
+
+#[test]
+fn completed_deletions_remove_entries_without_reloading_the_column() {
+    let browser = Browser::new(Rc::new(FakeFileSource));
+    browser.navigate(Location::local("/fixture"));
+    let events = Rc::new(RefCell::new(Vec::new()));
+    let observed = events.clone();
+    browser.observe(move |event| observed.borrow_mut().push(event));
+
+    browser.remove_deleted_locations(&[Location::local("/fixture/child")]);
+
+    assert!(browser.entry_at(0, 0).is_none());
+    assert!(events.borrow().iter().any(|event| matches!(
+        event,
+        BrowserEvent::EntriesSpliced { splices, .. }
+            if splices.iter().any(|splice| splice.removed == 1)
+    )));
+    assert!(
+        !events
+            .borrow()
+            .iter()
+            .any(|event| matches!(event, BrowserEvent::ColumnReloaded { .. }))
+    );
 }
 
 #[test]

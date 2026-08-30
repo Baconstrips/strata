@@ -29,6 +29,7 @@ pub struct PasteRequest {
     pub destination: Location,
     pub sources: Vec<Location>,
     pub move_sources: bool,
+    pub overwrite_existing: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -36,6 +37,12 @@ pub struct DeleteRequest {
     pub id: OperationRequestId,
     pub entries: Vec<FileEntry>,
     pub permanent: bool,
+}
+
+#[derive(Clone, Debug)]
+pub struct RestoreRequest {
+    pub id: OperationRequestId,
+    pub entries: Vec<FileEntry>,
 }
 
 #[derive(Clone, Debug)]
@@ -49,8 +56,35 @@ pub enum OperationEvent {
     Pasted {
         request_id: OperationRequestId,
     },
+    DeleteProgress {
+        request_id: OperationRequestId,
+        completed: usize,
+        total: usize,
+        deleted_location: Option<Location>,
+    },
+    RestoreProgress {
+        request_id: OperationRequestId,
+        completed: usize,
+        total: usize,
+        restored_location: Option<Location>,
+    },
     Deleted {
         request_id: OperationRequestId,
+        locations: Vec<Location>,
+    },
+    CompletedWithErrors {
+        request_id: OperationRequestId,
+        deleted_locations: Vec<Location>,
+        message: String,
+    },
+    Restored {
+        request_id: OperationRequestId,
+        locations: Vec<Location>,
+    },
+    RestoreCompletedWithErrors {
+        request_id: OperationRequestId,
+        restored_locations: Vec<Location>,
+        message: String,
     },
     Failed {
         request_id: OperationRequestId,
@@ -67,4 +101,5 @@ pub trait OperationProvider {
     ) -> LoadHandle;
     fn paste(&self, request: PasteRequest, emit: Rc<dyn Fn(OperationEvent)>) -> LoadHandle;
     fn delete(&self, request: DeleteRequest, emit: Rc<dyn Fn(OperationEvent)>) -> LoadHandle;
+    fn restore(&self, request: RestoreRequest, emit: Rc<dyn Fn(OperationEvent)>) -> LoadHandle;
 }

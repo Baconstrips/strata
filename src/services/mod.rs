@@ -10,7 +10,7 @@ pub use file_source::{
 };
 pub use operations::{
     CreateDirectoryRequest, DeleteRequest, OperationEvent, OperationProvider, OperationRequestId,
-    PasteRequest, RenameRequest,
+    PasteRequest, RenameRequest, RestoreRequest,
 };
 pub(crate) use preview::content_family;
 pub use preview::{
