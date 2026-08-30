@@ -444,8 +444,9 @@ impl PreviewState {
                     "Preview limited to the first 30 seconds. Open the file to play the full video.",
                 ));
                 notice.add_css_class("preview-note");
+                notice.set_justify(gtk::Justification::Center);
                 notice.set_wrap(true);
-                notice.set_xalign(0.0);
+                notice.set_xalign(0.5);
                 self.content.append(&notice);
             }
             PreviewContent::Image | PreviewContent::Media => {
