@@ -3,6 +3,7 @@
 mod adapters;
 mod app;
 mod assets;
+mod build_info;
 mod metrics;
 mod model;
 mod sandbox;
