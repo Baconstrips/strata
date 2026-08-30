@@ -36,6 +36,7 @@ struct PreviewState {
     modified: gtk::Label,
     content_type: gtk::Label,
     content: gtk::Box,
+    media: RefCell<Option<gtk::Video>>,
     split: RefCell<Option<gtk::Paned>>,
     occupied_width: RefCell<Option<Rc<dyn Fn() -> i32>>>,
     current: RefCell<Option<FileEntry>>,
@@ -115,6 +116,7 @@ impl PreviewDrawer {
             modified,
             content_type,
             content,
+            media: RefCell::new(None),
             split: RefCell::new(None),
             occupied_width: RefCell::new(None),
             current: RefCell::new(None),
@@ -267,6 +269,7 @@ impl PreviewState {
         self.current_request.set(None);
         self.load.borrow_mut().take();
         self.pdf_loads.borrow_mut().clear();
+        self.clear_content();
         self.revealer.set_transition_duration(0);
         self.revealer.set_reveal_child(false);
         if let Some(split) = self.split.borrow().as_ref() {
@@ -336,7 +339,7 @@ impl PreviewState {
 
     fn render(self: &Rc<Self>, preview: Preview) {
         self.content_type.set_text(&preview.content_type);
-        clear_box(&self.content);
+        self.clear_content();
         match preview.content {
             PreviewContent::Text { content, truncated } => {
                 let buffer = sourceview5::Buffer::new(None);
@@ -396,6 +399,7 @@ impl PreviewState {
                 video.set_file(Some(&file));
                 video.set_hexpand(true);
                 video.set_vexpand(true);
+                self.media.replace(Some(video.clone()));
                 self.content.append(&video);
             }
             PreviewContent::Pdf { png, page, pages } => {
@@ -676,8 +680,18 @@ impl PreviewState {
         self.content.append(&scroll);
     }
 
-    fn show_loading(&self) {
+    fn clear_content(&self) {
+        if let Some(video) = self.media.borrow_mut().take() {
+            if let Some(stream) = video.media_stream() {
+                stream.set_playing(false);
+            }
+            video.set_file(gio::File::NONE);
+        }
         clear_box(&self.content);
+    }
+
+    fn show_loading(&self) {
+        self.clear_content();
         let spinner = gtk::Spinner::new();
         spinner.add_css_class("preview-spinner");
         spinner.set_halign(gtk::Align::Center);
@@ -688,7 +702,7 @@ impl PreviewState {
     }
 
     fn show_message(&self, title: &str, detail: &str) {
-        clear_box(&self.content);
+        self.clear_content();
         let box_ = gtk::Box::new(gtk::Orientation::Vertical, 7);
         box_.add_css_class("preview-feedback");
         box_.set_halign(gtk::Align::Center);
