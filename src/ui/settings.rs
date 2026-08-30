@@ -1,10 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use std::{cell::RefCell, rc::Rc};
+use std::{
+    cell::{Cell, RefCell},
+    rc::Rc,
+    sync::mpsc::TryRecvError,
+    time::Duration,
+};
 
-use gtk::{gdk, prelude::*};
+use gtk::{gdk, glib, prelude::*};
 
-use crate::assets::icons;
+use crate::{
+    assets::icons,
+    services::{self, UpdateCheck},
+};
 
 use super::{
     blur::BlurBin,
@@ -14,12 +22,14 @@ use super::{
 };
 
 type ThemeCards = Rc<RefCell<Vec<(String, gtk::Button, gtk::Image)>>>;
+pub(super) type UpdateNoticeHandler = Rc<dyn Fn(Option<(String, String)>)>;
 
 pub fn build_layer(
     browser: &BrowserView,
     settings_button: &gtk::Button,
     root: &BlurBin,
     themes: Rc<ThemeManager>,
+    update_notice: UpdateNoticeHandler,
 ) -> gtk::Box {
     let layer = gtk::Box::new(gtk::Orientation::Vertical, 0);
     layer.add_css_class("settings-backdrop");
@@ -65,7 +75,10 @@ pub fn build_layer(
         .hexpand(true)
         .vexpand(true)
         .build();
-    stack.add_named(&general_page(browser, themes.clone()), Some("general"));
+    stack.add_named(
+        &general_page(browser, themes.clone(), update_notice),
+        Some("general"),
+    );
     stack.add_named(&keybindings_page(), Some("keybindings"));
     stack.add_named(&theme_page(themes), Some("theme"));
     stack.add_named(&about_page(), Some("about"));
@@ -133,7 +146,11 @@ fn hide(layer: &gtk::Box, button: &gtk::Button, root: &BlurBin) {
     button.remove_css_class("active");
 }
 
-fn general_page(browser: &BrowserView, manager: Rc<ThemeManager>) -> gtk::Widget {
+fn general_page(
+    browser: &BrowserView,
+    manager: Rc<ThemeManager>,
+    update_notice: UpdateNoticeHandler,
+) -> gtk::Widget {
     let preferences = page_content();
     append_heading(&preferences, "BROWSING");
     let (peeking_row, peeking) = settings_option(
@@ -169,8 +186,9 @@ fn general_page(browser: &BrowserView, manager: Rc<ThemeManager>) -> gtk::Widget
         "Launch files from search instead of opening Strata's quick preview.",
         direct_open_enabled,
     );
+    let manager_for_search_open = manager.clone();
     search_open_files.connect_active_notify(move |toggle| {
-        manager.set_search_open_files_directly(toggle.is_active());
+        manager_for_search_open.set_search_open_files_directly(toggle.is_active());
     });
     preferences.append(&search_open_row);
 
@@ -182,7 +200,130 @@ fn general_page(browser: &BrowserView, manager: Rc<ThemeManager>) -> gtk::Widget
     );
     reduce_motion.connect_active_notify(|toggle| set_reduce_motion(toggle.is_active()));
     preferences.append(&motion_row);
+
+    append_heading(&preferences, "UPDATES");
+    let auto_check_enabled = manager.checks_for_updates();
+    let (auto_check_row, auto_check) = settings_option(
+        "Automatically check for updates",
+        "Check GitHub for a newer release each time settings are opened.",
+        auto_check_enabled,
+    );
+    preferences.append(&auto_check_row);
+    let (update_row, run_check) = update_check_row(manager.clone(), update_notice.clone());
+    preferences.append(&update_row);
+
+    let manager_for_updates = manager.clone();
+    let toggled_check = run_check.clone();
+    auto_check.connect_active_notify(move |toggle| {
+        let enabled = toggle.is_active();
+        manager_for_updates.set_checks_for_updates(enabled);
+        if enabled {
+            toggled_check();
+        } else {
+            update_notice(None);
+        }
+    });
+    if auto_check_enabled {
+        run_check();
+    }
+
     preferences.upcast()
+}
+
+fn update_check_row(
+    manager: Rc<ThemeManager>,
+    update_notice: UpdateNoticeHandler,
+) -> (gtk::Box, Rc<dyn Fn()>) {
+    let row = gtk::Box::new(gtk::Orientation::Horizontal, 16);
+    row.add_css_class("settings-option");
+    let copy = gtk::Box::new(gtk::Orientation::Vertical, 2);
+    copy.set_hexpand(true);
+    copy.set_valign(gtk::Align::Center);
+    let title = gtk::Label::new(Some("Check for updates"));
+    title.set_xalign(0.0);
+    title.add_css_class("settings-option-title");
+    let status = gtk::Label::new(Some(&format!("Version {}", env!("CARGO_PKG_VERSION"))));
+    status.set_xalign(0.0);
+    status.set_wrap(true);
+    status.set_use_markup(true);
+    status.add_css_class("settings-option-description");
+    copy.append(&title);
+    copy.append(&status);
+    let button = gtk::Button::with_label("Check now");
+    button.add_css_class("settings-update-check");
+    button.set_valign(gtk::Align::Center);
+    row.append(&copy);
+    row.append(&button);
+
+    let checking = Rc::new(Cell::new(false));
+    let run_check: Rc<dyn Fn()> = Rc::new({
+        let checking = checking.clone();
+        let status = status.clone();
+        let button = button.clone();
+        let manager = manager.clone();
+        let update_notice = update_notice.clone();
+        move || {
+            if checking.replace(true) {
+                return;
+            }
+            status.set_text("Checking for updates…");
+            button.set_sensitive(false);
+            let receiver = services::check_for_updates(env!("CARGO_PKG_VERSION"));
+            let checking = checking.clone();
+            let status = status.clone();
+            let button = button.clone();
+            let manager = manager.clone();
+            let update_notice = update_notice.clone();
+            glib::timeout_add_local(Duration::from_millis(100), move || {
+                match receiver.try_recv() {
+                    Ok(result) => {
+                        status.set_markup(&update_check_message(&result));
+                        match &result {
+                            UpdateCheck::Available { version, url }
+                                if manager.checks_for_updates() =>
+                            {
+                                update_notice(Some((version.clone(), url.clone())));
+                            }
+                            UpdateCheck::UpToDate => update_notice(None),
+                            UpdateCheck::Available { .. } | UpdateCheck::Failed(_) => {}
+                        }
+                        button.set_sensitive(true);
+                        checking.set(false);
+                        glib::ControlFlow::Break
+                    }
+                    Err(TryRecvError::Empty) => glib::ControlFlow::Continue,
+                    Err(TryRecvError::Disconnected) => {
+                        status.set_text("Couldn't check for updates");
+                        button.set_sensitive(true);
+                        checking.set(false);
+                        glib::ControlFlow::Break
+                    }
+                }
+            });
+        }
+    });
+    let clicked_check = run_check.clone();
+    button.connect_clicked(move |_| clicked_check());
+    (row, run_check)
+}
+
+fn update_check_message(result: &UpdateCheck) -> String {
+    match result {
+        UpdateCheck::UpToDate => {
+            format!("Up to date — version {}", env!("CARGO_PKG_VERSION"))
+        }
+        UpdateCheck::Available { version, url } => format!(
+            "Update available: <a href=\"{}\">v{}</a>",
+            glib::markup_escape_text(url),
+            glib::markup_escape_text(version),
+        ),
+        UpdateCheck::Failed(message) => {
+            format!(
+                "Couldn't check for updates: {}",
+                glib::markup_escape_text(message)
+            )
+        }
+    }
 }
 
 fn keybindings_page() -> gtk::Widget {

@@ -79,6 +79,8 @@ struct Preferences {
     browser_mode: String,
     #[serde(default = "default_browser_density")]
     browser_density: String,
+    #[serde(default = "default_enabled")]
+    check_for_updates: bool,
 }
 
 impl Default for Preferences {
@@ -90,6 +92,7 @@ impl Default for Preferences {
             search_open_files_directly: false,
             browser_mode: default_browser_mode(),
             browser_density: default_browser_density(),
+            check_for_updates: true,
         }
     }
 }
@@ -188,6 +191,15 @@ impl ThemeManager {
 
     pub fn set_search_open_files_directly(&self, enabled: bool) {
         self.preferences.borrow_mut().search_open_files_directly = enabled;
+        self.save_preferences();
+    }
+
+    pub fn checks_for_updates(&self) -> bool {
+        self.preferences.borrow().check_for_updates
+    }
+
+    pub fn set_checks_for_updates(&self, enabled: bool) {
+        self.preferences.borrow_mut().check_for_updates = enabled;
         self.save_preferences();
     }
 

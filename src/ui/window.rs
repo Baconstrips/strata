@@ -252,8 +252,26 @@ pub fn present_location(application: &gtk::Application, location: Option<PathBuf
     window.add_action(&search_action);
     application.set_accels_for_action("win.search", &["<Control>k"]);
 
-    let settings_layer =
-        super::settings::build_layer(&browser, &settings, &blurred_root, theme_manager);
+    let update_link = sidebar.update_notice.clone();
+    let update_area = sidebar.update_area.clone();
+    let update_label = sidebar.update_label.clone();
+    let update_notice: super::settings::UpdateNoticeHandler = Rc::new(move |release| {
+        if let Some((version, url)) = release {
+            update_link.set_uri(&url);
+            update_link.set_tooltip_text(Some(&format!("Open the v{version} release page")));
+            update_label.set_text(&format!("v{version} available"));
+            update_area.set_visible(true);
+        } else {
+            update_area.set_visible(false);
+        }
+    });
+    let settings_layer = super::settings::build_layer(
+        &browser,
+        &settings,
+        &blurred_root,
+        theme_manager,
+        update_notice,
+    );
     window_overlay.add_overlay(&settings_layer);
     let shown_settings = settings_layer.clone();
     let settings_button = settings.clone();
@@ -731,6 +749,9 @@ struct SidebarState {
 struct SidebarView {
     widget: gtk::Widget,
     state: Rc<SidebarState>,
+    update_notice: gtk::LinkButton,
+    update_area: gtk::Box,
+    update_label: gtk::Label,
     handlers: RefCell<Vec<glib::SignalHandlerId>>,
 }
 
@@ -1270,8 +1291,41 @@ fn build_sidebar(view: BrowserView) -> SidebarView {
         .hscrollbar_policy(gtk::PolicyType::Never)
         .vscrollbar_policy(gtk::PolicyType::Automatic)
         .width_request(SIDEBAR_WIDTH)
+        .vexpand(true)
         .build();
     scroller.add_css_class("sidebar-scroll");
+
+    let update_content = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    let dot = gtk::Label::new(Some("●"));
+    dot.add_css_class("sidebar-update-dot");
+    let update_label = gtk::Label::new(None);
+    update_label.add_css_class("sidebar-update-label");
+    update_label.set_xalign(0.0);
+    update_label.set_hexpand(true);
+    update_label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    update_content.append(&dot);
+    update_content.append(&update_label);
+    update_content.append(&crate::assets::primary_icon(
+        crate::assets::icons::DOWNLOADS,
+        17,
+    ));
+    let update_notice = gtk::LinkButton::builder()
+        .uri("")
+        .child(&update_content)
+        .build();
+    update_notice.add_css_class("sidebar-update");
+    let update_separator = gtk::Separator::new(gtk::Orientation::Horizontal);
+    update_separator.add_css_class("sidebar-separator");
+    update_separator.add_css_class("sidebar-update-separator");
+    let update_area = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    update_area.set_visible(false);
+    update_area.append(&update_separator);
+    update_area.append(&update_notice);
+
+    let shell = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    shell.add_css_class("sidebar-shell");
+    shell.append(&scroller);
+    shell.append(&update_area);
     let volume_monitor = gio::VolumeMonitor::get();
     let state = Rc::new(SidebarState {
         widget,
@@ -1336,8 +1390,11 @@ fn build_sidebar(view: BrowserView) -> SidebarView {
     state.rebuild();
 
     SidebarView {
-        widget: scroller.upcast(),
+        widget: shell.upcast(),
         state,
+        update_notice,
+        update_area,
+        update_label,
         handlers: RefCell::new(handlers),
     }
 }

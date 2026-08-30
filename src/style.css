@@ -633,6 +633,46 @@ headerbar menubutton.header-action > button:focus-visible image {
   font-size: 0.88em;
 }
 
+.settings-option-description link,
+.settings-option-description link:visited,
+.settings-option-description link:hover,
+.settings-option-description link:active {
+  color: @theme_accent;
+}
+
+.settings-update-check {
+  background: alpha(@theme_accent, 0.14);
+  border: 1px solid @theme_accent;
+  border-radius: 5px;
+  box-shadow: none;
+  color: @theme_accent;
+  min-height: 28px;
+  padding: 3px 12px;
+}
+
+.settings-update-check:hover {
+  background: alpha(@theme_accent, 0.22);
+  border-color: @theme_accent;
+  color: @theme_accent;
+}
+
+.settings-update-check:active {
+  background: alpha(@theme_accent, 0.32);
+  border-color: @theme_accent;
+  color: @theme_accent;
+}
+
+.settings-update-check:focus-visible {
+  outline: 2px solid alpha(@theme_accent, 0.5);
+  outline-offset: 1px;
+}
+
+.settings-update-check:disabled {
+  background: alpha(@theme_muted, 0.3);
+  border-color: alpha(@theme_border, 0.54);
+  color: @theme_dim_text;
+}
+
 .about-page {
   color: @theme_text;
 }
@@ -729,15 +769,55 @@ switch:checked slider {
   min-width: 18px;
 }
 
+.sidebar-shell,
 .sidebar-scroll,
 .sidebar-scroll viewport {
   background: @theme_surface;
 }
 
+.sidebar-shell {
+  border-right: 1px solid alpha(@theme_border, 0.6);
+}
+
 .sidebar {
   background: @theme_surface;
-  border-right: 1px solid alpha(@theme_border, 0.6);
   padding: 8px 7px;
+}
+
+.sidebar-update {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  color: @theme_accent;
+  min-height: 38px;
+  padding: 4px 13px;
+}
+
+.sidebar-update:hover {
+  background: alpha(@theme_muted, 0.38);
+  color: @theme_accent;
+}
+
+.sidebar-update:active {
+  background: alpha(@theme_muted, 0.56);
+  color: @theme_accent;
+}
+
+.sidebar-update:focus-visible {
+  outline: 2px solid alpha(@theme_accent, 0.58);
+  outline-offset: -2px;
+}
+
+.sidebar-update-dot {
+  color: @theme_accent;
+  font-size: 0.8em;
+}
+
+.sidebar-update-label {
+  color: @theme_accent;
+  font-size: 0.88em;
+  font-weight: 650;
 }
 
 .sidebar-row {
@@ -783,6 +863,10 @@ switch:checked slider {
   background: alpha(@theme_border, 0.24);
   margin: 6px 4px;
   min-height: 1px;
+}
+
+.sidebar-update-separator {
+  margin: 0 4px;
 }
 
 .sidebar-heading {
