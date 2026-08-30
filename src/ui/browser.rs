@@ -4530,21 +4530,22 @@ pub(super) fn column_sort_menu(browser: &Rc<Browser>, depth: usize) -> gtk::Menu
     heading.add_css_class("menu-heading");
     content.append(&heading);
 
-    let selected_checks: Rc<RefCell<Vec<gtk::Image>>> = Rc::new(RefCell::new(Vec::new()));
-    for (label, key, selected) in [
-        ("Name", SortKey::Name, true),
-        ("Size", SortKey::Size, false),
-        ("Modified", SortKey::Modified, false),
-        ("Type", SortKey::Type, false),
+    let preferences = browser.column_preferences(depth).unwrap_or_default();
+    let selected_checks: Rc<RefCell<Vec<(SortKey, gtk::Image)>>> =
+        Rc::new(RefCell::new(Vec::new()));
+    for (label, key) in [
+        ("Name", SortKey::Name),
+        ("Size", SortKey::Size),
+        ("Modified", SortKey::Modified),
+        ("Type", SortKey::Type),
     ] {
-        let (option, check) = column_menu_option(label, selected);
-        selected_checks.borrow_mut().push(check.clone());
-        let index = selected_checks.borrow().len() - 1;
+        let (option, check) = column_menu_option(label, preferences.sort_key == key);
+        selected_checks.borrow_mut().push((key, check));
         let checks = selected_checks.clone();
         let weak_browser = Rc::downgrade(browser);
         option.connect_clicked(move |_| {
-            for (check_index, check) in checks.borrow().iter().enumerate() {
-                check.set_visible(check_index == index);
+            for (check_key, check) in checks.borrow().iter() {
+                check.set_visible(*check_key == key);
             }
             if let Some(browser) = weak_browser.upgrade() {
                 browser.set_sort_key(depth, key);
@@ -4554,13 +4555,16 @@ pub(super) fn column_sort_menu(browser: &Rc<Browser>, depth: usize) -> gtk::Menu
     }
 
     content.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
-    let (folders_first, folders_check) = column_menu_option("Folders first", true);
-    let folders_enabled = Rc::new(Cell::new(true));
+    let (folders_first, folders_check) =
+        column_menu_option("Folders first", preferences.folders_first);
+    let folders_enabled = Rc::new(Cell::new(preferences.folders_first));
     let weak_browser = Rc::downgrade(browser);
+    let folders_enabled_for_click = folders_enabled.clone();
+    let folders_check_for_click = folders_check.clone();
     folders_first.connect_clicked(move |_| {
-        let enabled = !folders_enabled.get();
-        folders_enabled.set(enabled);
-        folders_check.set_visible(enabled);
+        let enabled = !folders_enabled_for_click.get();
+        folders_enabled_for_click.set(enabled);
+        folders_check_for_click.set_visible(enabled);
         if let Some(browser) = weak_browser.upgrade() {
             browser.set_folders_first(depth, enabled);
         }
@@ -4574,6 +4578,23 @@ pub(super) fn column_sort_menu(browser: &Rc<Browser>, depth: usize) -> gtk::Menu
         .position(gtk::PositionType::Bottom)
         .build();
     popover.add_css_class("column-popover");
+    let weak_browser = Rc::downgrade(browser);
+    let checks = selected_checks.clone();
+    let folders_enabled_for_map = folders_enabled.clone();
+    let folders_check_for_map = folders_check.clone();
+    popover.connect_map(move |_| {
+        let Some(preferences) = weak_browser
+            .upgrade()
+            .and_then(|browser| browser.column_preferences(depth))
+        else {
+            return;
+        };
+        for (key, check) in checks.borrow().iter() {
+            check.set_visible(*key == preferences.sort_key);
+        }
+        folders_enabled_for_map.set(preferences.folders_first);
+        folders_check_for_map.set_visible(preferences.folders_first);
+    });
     let button = gtk::MenuButton::builder()
         .tooltip_text("Choose sort field")
         .popover(&popover)
@@ -4590,28 +4611,66 @@ pub(super) fn column_sort_direction_toggle(
     browser: &Rc<Browser>,
     depth: usize,
 ) -> gtk::ToggleButton {
-    let button = gtk::ToggleButton::builder()
-        .tooltip_text("Ascending — click to reverse")
-        .build();
+    let direction = browser
+        .column_preferences(depth)
+        .unwrap_or_default()
+        .sort_direction;
+    let button = gtk::ToggleButton::new();
     let icon = crate::assets::text_icon(crate::assets::icons::ARROW_UP_NARROW_WIDE, 16);
     button.set_child(Some(&icon));
     button.add_css_class("column-header-action");
+    sync_sort_direction_toggle(&button, &icon, direction);
+
     let weak_browser = Rc::downgrade(browser);
-    button.connect_toggled(move |button| {
-        let direction = if button.is_active() {
-            crate::assets::set_text_icon(&icon, crate::assets::icons::ARROW_DOWN_WIDE_NARROW);
-            button.set_tooltip_text(Some("Descending — click to reverse"));
-            SortDirection::Descending
-        } else {
-            crate::assets::set_text_icon(&icon, crate::assets::icons::ARROW_UP_NARROW_WIDE);
-            button.set_tooltip_text(Some("Ascending — click to reverse"));
-            SortDirection::Ascending
-        };
-        if let Some(browser) = weak_browser.upgrade() {
-            browser.set_sort_direction(depth, direction);
+    let icon_for_map = icon.clone();
+    button.connect_map(move |button| {
+        if let Some(direction) = weak_browser
+            .upgrade()
+            .and_then(|browser| browser.column_preferences(depth))
+            .map(|preferences| preferences.sort_direction)
+        {
+            sync_sort_direction_toggle(button, &icon_for_map, direction);
         }
     });
+    let weak_browser = Rc::downgrade(browser);
+    button.connect_clicked(move |button| {
+        let Some(browser) = weak_browser.upgrade() else {
+            return;
+        };
+        let direction = match browser
+            .column_preferences(depth)
+            .unwrap_or_default()
+            .sort_direction
+        {
+            SortDirection::Ascending => SortDirection::Descending,
+            SortDirection::Descending => SortDirection::Ascending,
+        };
+        sync_sort_direction_toggle(button, &icon, direction);
+        browser.set_sort_direction(depth, direction);
+    });
     button
+}
+
+fn sync_sort_direction_toggle(
+    button: &gtk::ToggleButton,
+    icon: &gtk::Image,
+    direction: SortDirection,
+) {
+    let descending = direction == SortDirection::Descending;
+    button.set_active(descending);
+    crate::assets::set_text_icon(
+        icon,
+        if descending {
+            crate::assets::icons::ARROW_DOWN_WIDE_NARROW
+        } else {
+            crate::assets::icons::ARROW_UP_NARROW_WIDE
+        },
+    );
+    button.set_tooltip_text(Some(if descending {
+        "Descending — click to reverse"
+    } else {
+        "Ascending — click to reverse"
+    }));
 }
 
 fn column_menu_option(label: &str, selected: bool) -> (gtk::Button, gtk::Image) {

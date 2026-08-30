@@ -357,7 +357,13 @@ impl NavigationState {
         depth: usize,
         preferences: ViewPreferences,
     ) -> Option<(Vec<FileEntry>, Option<usize>, Vec<usize>)> {
-        let column = self.columns.get_mut(depth)?;
+        if depth >= self.columns.len() {
+            return None;
+        }
+        self.preferences.sort_key = preferences.sort_key;
+        self.preferences.sort_direction = preferences.sort_direction;
+        self.preferences.folders_first = preferences.folders_first;
+        let column = &mut self.columns[depth];
         let selected_location = column
             .selected
             .and_then(|position| column.entries.get(position))
