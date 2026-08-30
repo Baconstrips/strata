@@ -1622,7 +1622,11 @@ impl ViewState {
             }
         });
         layer.add_controller(escape);
-        cancel.grab_focus();
+        if permanent {
+            cancel.grab_focus();
+        } else {
+            confirm.grab_focus();
+        }
     }
 
     fn show_folder_properties(self: &Rc<Self>, location: &Location) {
