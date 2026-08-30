@@ -16,6 +16,7 @@ use crate::{
     model::{EntryKind, FileEntry, Location, SortDirection, SortKey},
     services::{
         FileSource, OperationProvider, PreviewContent, content_family, has_plain_text_extension,
+        validate_basename,
     },
 };
 
@@ -588,6 +589,15 @@ impl BrowserView {
         self.state.show_folder_properties(location);
     }
 
+    pub fn show_focused_properties(&self) -> bool {
+        self.state.sync_mode_selection();
+        let Some(entry) = self.state.browser.focused_entry() else {
+            return false;
+        };
+        self.state.show_entry_properties(entry);
+        true
+    }
+
     pub fn confirm_empty_trash(&self) {
         self.state.load_trash_summary();
     }
@@ -703,19 +713,25 @@ impl ViewState {
     }
 
     fn submit_new_folder(self: &Rc<Self>, field: &gtk::Entry) {
-        let Some(active) = self
+        if !self
             .active_new_folder
-            .take()
-            .filter(|active| active.field == *field)
-        else {
+            .borrow()
+            .as_ref()
+            .is_some_and(|active| active.field == *field)
+        {
+            return;
+        }
+        let name = field.text().to_string();
+        if !update_basename_validation(field) {
+            field.grab_focus();
+            return;
+        }
+        let Some(active) = self.active_new_folder.take() else {
             return;
         };
         active.row.set_visible(false);
-        let name = field.text().to_string();
         field.set_text("");
-        if !name.is_empty() {
-            self.browser.create_directory(active.location, name);
-        }
+        self.browser.create_directory(active.location, name);
     }
 
     fn cancel_new_folder(&self) -> bool {
@@ -2703,6 +2719,9 @@ impl ViewState {
             rename.add_css_class("inline-rename");
             rename.set_hexpand(true);
             rename.set_visible(false);
+            rename.connect_changed(|field| {
+                update_basename_validation(field);
+            });
             let weak_state_for_rename = weak_state.clone();
             rename.connect_activate(move |field| {
                 if let Some(state) = weak_state_for_rename.upgrade() {
@@ -3182,6 +3201,9 @@ impl ViewState {
         let new_folder_entry = gtk::Entry::new();
         new_folder_entry.add_css_class("inline-rename");
         new_folder_entry.set_hexpand(true);
+        new_folder_entry.connect_changed(|field| {
+            update_basename_validation(field);
+        });
         new_folder_row.append(&new_folder_icon);
         new_folder_row.append(&new_folder_entry);
         let weak_state = Rc::downgrade(self);
@@ -4867,6 +4889,21 @@ fn set_cut_path_style(row: &gtk::Box, cut: bool) {
     }
 }
 
+pub(super) fn update_basename_validation(field: &gtk::Entry) -> bool {
+    match validate_basename(field.text().as_str()) {
+        Ok(()) => {
+            field.remove_css_class("error");
+            field.set_tooltip_text(None);
+            true
+        }
+        Err(message) => {
+            field.add_css_class("error");
+            field.set_tooltip_text(Some(message));
+            false
+        }
+    }
+}
+
 pub(super) fn rename_stem_end(name: &str) -> i32 {
     let end = name
         .rfind('.')
@@ -5235,7 +5272,7 @@ fn properties_action(icon: &str, label: &str) -> gtk::Button {
     button
 }
 
-fn open_location(location: &Location, parent: &impl IsA<gtk::Widget>) {
+pub(super) fn open_location(location: &Location, parent: &impl IsA<gtk::Widget>) {
     let file = gio_file_for_location(location);
     let uri = file.uri();
     if let Err(error) = gio::AppInfo::launch_default_for_uri(&uri, None::<&gio::AppLaunchContext>) {

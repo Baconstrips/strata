@@ -318,6 +318,9 @@ impl ModeViews {
         field.add_css_class("inline-rename");
         field.set_width_chars(12);
         field.set_text(&entry.display_name);
+        field.connect_changed(|field| {
+            super::browser::update_basename_validation(field);
+        });
         label.set_visible(false);
         parent.append(&field);
         let browser = Rc::downgrade(&self.browser);
@@ -758,20 +761,31 @@ fn submit_mode_new_folder(
     location: &Option<Location>,
     field: &gtk::Entry,
 ) {
-    let Some(active) = active.take().filter(|active| active.field == *field) else {
+    if !active
+        .borrow()
+        .as_ref()
+        .is_some_and(|active| active.field == *field)
+    {
+        return;
+    }
+    let name = field.text().to_string();
+    if !super::browser::update_basename_validation(field) {
+        field.grab_focus();
+        return;
+    }
+    let Some(active) = active.take() else {
         return;
     };
-    let name = field.text().to_string();
     finish_mode_new_folder(&active);
-    if !name.is_empty()
-        && let (Some(browser), Some(location)) = (browser.upgrade(), location.clone())
-    {
+    if let (Some(browser), Some(location)) = (browser.upgrade(), location.clone()) {
         browser.create_directory(location, name);
     }
 }
 
 fn finish_mode_new_folder(active: &ActiveModeNewFolder) {
     active.field.set_text("");
+    active.field.remove_css_class("error");
+    active.field.set_tooltip_text(None);
     active.view.remove_css_class("creating-folder");
     if let Some(placeholder) = active.placeholder.as_ref() {
         placeholder.splice(0, placeholder.n_items(), &[]);
@@ -988,6 +1002,9 @@ fn build_grid_pane(
         field.add_css_class("inline-rename");
         field.set_width_chars(12);
         field.set_visible(false);
+        field.connect_changed(|field| {
+            super::browser::update_basename_validation(field);
+        });
         let active_for_submit = active_for_setup.clone();
         let browser_for_submit = browser_for_setup.clone();
         let location_for_submit = folder_location.clone();
@@ -1538,6 +1555,9 @@ fn build_explorer_pane(
         field.add_css_class("inline-rename");
         field.set_hexpand(true);
         field.set_visible(false);
+        field.connect_changed(|field| {
+            super::browser::update_basename_validation(field);
+        });
         let active_for_submit = active_for_setup.clone();
         let browser_for_submit = browser_for_setup.clone();
         let location_for_submit = folder_location.clone();

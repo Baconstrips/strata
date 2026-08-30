@@ -55,22 +55,25 @@ Strata is not yet available through Arch's package repositories. Download the ar
 - `x86_64-unknown-linux-gnu` for Intel and AMD PCs
 - `aarch64-unknown-linux-gnu` for ARM64 PCs
 
-Install the runtime libraries and optional video-thumbnail helper on Arch or Omarchy:
+Install the runtime libraries and optional video preview tools on Arch or Omarchy:
 
 ```bash
-sudo pacman -S --needed fontconfig gtk4 gtksourceview5 poppler-glib ffmpegthumbnailer
+sudo pacman -S --needed bubblewrap ffmpeg ffmpegthumbnailer fontconfig gtk4 gtksourceview5 poppler-glib
 ```
 
-Then verify, extract, and install the downloaded archive (replace the filename with the release you downloaded):
+Then verify, extract, and install the downloaded archive (replace the filename with the release you downloaded). The `gh attestation` check verifies the archive's signed GitHub Actions provenance:
 
 ```bash
 cd ~/Downloads
 sha256sum --check strata-<version>-<target>.tar.gz.sha256
+gh attestation verify strata-<version>-<target>.tar.gz --repo LGSE/strata
 tar -xzf strata-<version>-<target>.tar.gz
 install -Dm755 strata-<version>-<target>/strata ~/.local/bin/strata
 ```
 
-Ensure `~/.local/bin` is on `PATH`, then run `strata`. Image thumbnails work without `ffmpegthumbnailer`; when that optional program is unavailable, video files fall back to their video icon.
+Each archive also contains `SOURCE_COMMIT`, which records the exact commit used for the build.
+
+Ensure `~/.local/bin` is on `PATH`, then run `strata`. Image thumbnails work without `ffmpegthumbnailer`; when `ffmpegthumbnailer` or `ffmpeg` is unavailable, video files fall back to their video icon or an unavailable preview. Bubblewrap is required: preview parsing fails closed rather than running untrusted native parsers without a sandbox. See [Preview sandbox](docs/preview-sandbox.md) for the providers, permissions, and resource limits.
 
 #### Optional RAW photo thumbnails
 
@@ -186,7 +189,7 @@ The architectural boundaries and performance workflow are documented in [`docs/a
 On Arch Linux:
 
 ```bash
-sudo pacman -S --needed base-devel rust fontconfig gtk4 gtksourceview5 poppler-glib
+sudo pacman -S --needed base-devel rust bubblewrap fontconfig gtk4 gtksourceview5 poppler-glib
 ```
 
 Run Strata:
@@ -218,9 +221,9 @@ Maintainers can run the **Release** workflow from GitHub's Actions tab on the de
 
 - commits the new version to `Cargo.toml` and `Cargo.lock`;
 - creates an annotated `vX.Y.Z` tag; and
-- publishes x86-64 and ARM64 archives, SHA-256 checksum files, and generated release notes.
+- publishes x86-64 and ARM64 archives, SHA-256 checksum files, signed build-provenance attestations, and generated release notes.
 
-The release workflow stops without publishing if the default branch changes while binaries are building. Run it again from the new head in that case.
+The final publishing job uses the protected `release` GitHub environment and is the only job granted write permissions. Repository administrators must configure that environment with required reviewers; prevent self-review when a separate maintainer is available to approve releases. The release workflow stops without publishing if the default branch changes while binaries are building. Run it again from the new head in that case.
 
 ## Bundled assets
 

@@ -3,6 +3,7 @@ name = "strata"
 version = "0.2.0"
 edition = "2024"
 description = "A fast, keyboard-first file manager for Linux"
+authors = ["LGSE Ltd."]
 license = "GPL-3.0-or-later"
 repository = "https://github.com/LGSE/strata"
 keywords = ["file-manager", "gtk4", "linux", "wayland"]

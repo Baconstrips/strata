@@ -12,7 +12,7 @@ pub use file_source::{
 };
 pub use operations::{
     CreateDirectoryRequest, DeleteRequest, OperationEvent, OperationProvider, OperationRequestId,
-    PasteRequest, RenameRequest, RestoreRequest,
+    PasteRequest, RenameRequest, RestoreRequest, validate_basename,
 };
 pub use preview::{
     Preview, PreviewContent, PreviewEvent, PreviewProvider, PreviewRequest, PreviewRequestId,
