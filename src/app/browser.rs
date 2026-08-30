@@ -10,9 +10,9 @@ use crate::{
     app::navigation::{EntryInsertion, EntrySplice, NavigationPath, NavigationState},
     model::{FileEntry, Location, SortDirection, SortKey, ViewPreferences},
     services::{
-        CreateDirectoryRequest, DirectoryChange, DirectoryEvent, DirectoryRequest, FileSource,
-        LoadHandle, LocationValidationError, OperationEvent, OperationProvider, OperationRequestId,
-        PasteRequest, RenameRequest, RequestId,
+        CreateDirectoryRequest, DeleteRequest, DirectoryChange, DirectoryEvent, DirectoryRequest,
+        FileSource, LoadHandle, LocationValidationError, OperationEvent, OperationProvider,
+        OperationRequestId, PasteRequest, RenameRequest, RequestId,
     },
 };
 
@@ -419,6 +419,10 @@ impl Browser {
         self.focused_item().map(|(_, _, entry)| entry)
     }
 
+    pub fn selected_entries(&self) -> Vec<FileEntry> {
+        self.state.borrow().selected_entries()
+    }
+
     pub fn set_selection(&self, depth: usize, positions: &[usize], focused: Option<usize>) {
         let mut state = self.state.borrow_mut();
         if state.set_selection(depth, positions, focused) {
@@ -501,6 +505,28 @@ impl Browser {
         self.operation_load.replace(Some(load));
     }
 
+    pub fn delete(self: &Rc<Self>, entries: Vec<FileEntry>, permanent: bool) {
+        if entries.is_empty() {
+            return;
+        }
+        let Some(provider) = self.operation_provider.borrow().clone() else {
+            self.emit(BrowserEvent::OperationFailed {
+                message: "File operations are unavailable".to_owned(),
+            });
+            return;
+        };
+        let request_id = self.begin_operation();
+        let load = provider.delete(
+            DeleteRequest {
+                id: request_id,
+                entries,
+                permanent,
+            },
+            self.operation_callback(request_id, false),
+        );
+        self.operation_load.replace(Some(load));
+    }
+
     fn begin_operation(&self) -> OperationRequestId {
         self.operation_load.borrow_mut().take();
         let request_id = OperationRequestId(self.next_request.get());
@@ -524,6 +550,7 @@ impl Browser {
                 OperationEvent::Renamed { request_id }
                 | OperationEvent::Created { request_id }
                 | OperationEvent::Pasted { request_id }
+                | OperationEvent::Deleted { request_id }
                 | OperationEvent::Failed { request_id, .. } => *request_id,
             };
             if event_id != request_id || browser.current_operation.get() != Some(event_id) {
@@ -539,7 +566,9 @@ impl Browser {
                     browser.emit(BrowserEvent::OperationFailed { message });
                 }
                 OperationEvent::Renamed { .. } => browser.emit(BrowserEvent::RenameCompleted),
-                OperationEvent::Created { .. } | OperationEvent::Pasted { .. } => {}
+                OperationEvent::Created { .. }
+                | OperationEvent::Pasted { .. }
+                | OperationEvent::Deleted { .. } => {}
             }
         })
     }

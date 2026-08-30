@@ -19,6 +19,27 @@ fn inline_rename_selects_the_stem_but_keeps_the_extension() {
 }
 
 #[test]
+fn properties_permissions_are_formatted_symbolically_and_numerically() {
+    assert_eq!(format_permissions(0o100774), "-rwxrwxr--  774");
+    assert_eq!(format_permissions(0o040755), "drwxr-xr-x  755");
+}
+
+#[test]
+fn properties_paths_abbreviate_the_home_directory() {
+    let home = glib::home_dir();
+
+    assert_eq!(compact_display_path(&Location::local(&home)), "~");
+    assert_eq!(
+        compact_display_path(&Location::local(home.join("Documents/report.txt"))),
+        "~/Documents/report.txt"
+    );
+    assert_eq!(
+        compact_display_path(&Location::uri("trash:///example")),
+        "trash:///example"
+    );
+}
+
+#[test]
 fn file_names_map_to_specific_lucide_icons() {
     assert_eq!(icon_for_name("setup.sh"), crate::assets::icons::TERMINAL);
     assert_eq!(icon_for_name("photo.webp"), crate::assets::icons::PICTURES);

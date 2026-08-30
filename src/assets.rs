@@ -22,6 +22,7 @@ pub mod icons {
     pub const DOWNLOADS: &str = "strata-download";
     pub const EYE: &str = "strata-eye";
     pub const EYE_OFF: &str = "strata-eye-off";
+    pub const EXTERNAL_LINK: &str = "strata-external-link";
     pub const FILE_ARCHIVE: &str = "strata-file-archive";
     pub const FILE_CODE: &str = "strata-file-code";
     pub const FOLDER: &str = "strata-folder";
@@ -35,6 +36,8 @@ pub mod icons {
     pub const MONITOR: &str = "strata-monitor";
     pub const PALETTE: &str = "strata-palette";
     pub const PANEL_LEFT: &str = "strata-panel-left-symbolic";
+    pub const PENCIL: &str = "strata-pencil";
+    pub const PIN: &str = "strata-pin";
     pub const PLUS: &str = "strata-plus";
     pub const PICTURES: &str = "strata-image";
     pub const ROWS: &str = "strata-rows";

@@ -49,6 +49,8 @@ pub struct ThemeTokens {
     pub surface: String,
     pub text: String,
     pub accent: String,
+    #[serde(default = "default_danger")]
+    pub danger: String,
     pub muted: String,
     pub highlight: String,
     pub border: String,
@@ -322,6 +324,7 @@ fn azure_tokens() -> ThemeTokens {
         surface: "#122438".to_owned(),
         text: "#c9deed".to_owned(),
         accent: "#4fd6ff".to_owned(),
+        danger: default_danger(),
         muted: "#1e3a52".to_owned(),
         highlight: "#244d68".to_owned(),
         border: "#315b75".to_owned(),
@@ -391,7 +394,12 @@ fn tokens_from_quattro(name: &str, source: &str) -> Option<ThemeTokens> {
         dim_text: blend(&source_background, &text, 0.62),
         text,
         accent,
+        danger: get("color1").unwrap_or_else(default_danger),
     })
+}
+
+fn default_danger() -> String {
+    "#e5484d".to_owned()
 }
 
 fn validate_tokens(tokens: &ThemeTokens) -> Result<(), &'static str> {
@@ -403,6 +411,7 @@ fn validate_tokens(tokens: &ThemeTokens) -> Result<(), &'static str> {
         &tokens.surface,
         &tokens.text,
         &tokens.accent,
+        &tokens.danger,
         &tokens.muted,
         &tokens.highlight,
         &tokens.border,
@@ -489,11 +498,12 @@ fn source_style_scheme_xml(tokens: &ThemeTokens) -> String {
 
 fn tokens_css(tokens: &ThemeTokens) -> String {
     format!(
-        "@define-color theme_bg {};\n@define-color theme_surface {};\n@define-color theme_text {};\n@define-color theme_accent {};\n@define-color theme_muted {};\n@define-color theme_highlight {};\n@define-color theme_border {};\n@define-color theme_dim_text {};\n",
+        "@define-color theme_bg {};\n@define-color theme_surface {};\n@define-color theme_text {};\n@define-color theme_accent {};\n@define-color theme_danger {};\n@define-color theme_muted {};\n@define-color theme_highlight {};\n@define-color theme_border {};\n@define-color theme_dim_text {};\n",
         tokens.background,
         tokens.surface,
         tokens.text,
         tokens.accent,
+        tokens.danger,
         tokens.muted,
         tokens.highlight,
         tokens.border,

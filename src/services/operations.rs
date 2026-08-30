@@ -31,6 +31,13 @@ pub struct PasteRequest {
 }
 
 #[derive(Clone, Debug)]
+pub struct DeleteRequest {
+    pub id: OperationRequestId,
+    pub entries: Vec<FileEntry>,
+    pub permanent: bool,
+}
+
+#[derive(Clone, Debug)]
 pub enum OperationEvent {
     Renamed {
         request_id: OperationRequestId,
@@ -39,6 +46,9 @@ pub enum OperationEvent {
         request_id: OperationRequestId,
     },
     Pasted {
+        request_id: OperationRequestId,
+    },
+    Deleted {
         request_id: OperationRequestId,
     },
     Failed {
@@ -55,4 +65,5 @@ pub trait OperationProvider {
         emit: Rc<dyn Fn(OperationEvent)>,
     ) -> LoadHandle;
     fn paste(&self, request: PasteRequest, emit: Rc<dyn Fn(OperationEvent)>) -> LoadHandle;
+    fn delete(&self, request: DeleteRequest, emit: Rc<dyn Fn(OperationEvent)>) -> LoadHandle;
 }

@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use std::rc::Rc;
+use std::{future::Future, pin::Pin, rc::Rc};
 
 use gtk::{gio, glib, prelude::*};
 
 use crate::{
     model::Location,
     services::{
-        CreateDirectoryRequest, LoadHandle, OperationEvent, OperationProvider, PasteRequest,
-        RenameRequest,
+        CreateDirectoryRequest, DeleteRequest, LoadHandle, OperationEvent, OperationProvider,
+        PasteRequest, RenameRequest,
     },
 };
 
@@ -17,6 +17,39 @@ fn gio_file(location: &Location) -> gio::File {
         .native_path()
         .map(gio::File::for_path)
         .unwrap_or_else(|| gio::File::for_uri(location.uri_value().unwrap_or_default()))
+}
+
+fn permanently_delete(
+    file: gio::File,
+    directory: bool,
+) -> Pin<Box<dyn Future<Output = Result<(), glib::Error>>>> {
+    Box::pin(async move {
+        if directory {
+            let enumerator = file
+                .enumerate_children_future(
+                    "standard::name,standard::type",
+                    gio::FileQueryInfoFlags::NOFOLLOW_SYMLINKS,
+                    glib::Priority::DEFAULT,
+                )
+                .await?;
+            loop {
+                let children = enumerator
+                    .next_files_future(64, glib::Priority::DEFAULT)
+                    .await?;
+                if children.is_empty() {
+                    break;
+                }
+                for child in children {
+                    permanently_delete(
+                        file.child(child.name()),
+                        child.file_type() == gio::FileType::Directory,
+                    )
+                    .await?;
+                }
+            }
+        }
+        file.delete_future(glib::Priority::DEFAULT).await
+    })
 }
 
 #[derive(Default)]
@@ -93,6 +126,30 @@ impl OperationProvider for LocalOperationProvider {
                 }
             }
             emit(OperationEvent::Pasted {
+                request_id: request.id,
+            });
+        });
+        LoadHandle::new(move || task.abort())
+    }
+
+    fn delete(&self, request: DeleteRequest, emit: Rc<dyn Fn(OperationEvent)>) -> LoadHandle {
+        let task = glib::MainContext::default().spawn_local(async move {
+            for entry in &request.entries {
+                let file = gio_file(&entry.location);
+                let result = if request.permanent {
+                    permanently_delete(file, entry.is_directory()).await
+                } else {
+                    file.trash_future(glib::Priority::DEFAULT).await
+                };
+                if let Err(error) = result {
+                    emit(OperationEvent::Failed {
+                        request_id: request.id,
+                        message: format!("{}: {error}", entry.display_name),
+                    });
+                    return;
+                }
+            }
+            emit(OperationEvent::Deleted {
                 request_id: request.id,
             });
         });

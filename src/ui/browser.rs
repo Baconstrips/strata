@@ -15,7 +15,10 @@ use crate::{
     services::{FileSource, OperationProvider},
 };
 
-use super::motion::{animations_enabled, emphasized_deceleration};
+use super::{
+    blur::BlurBin,
+    motion::{animations_enabled, emphasized_deceleration},
+};
 
 const COLUMN_WIDTH: i32 = 300;
 const COLUMN_OFFSET: i32 = 24;
@@ -582,17 +585,224 @@ impl ViewState {
         });
     }
 
-    fn show_folder_properties(&self, location: &Location) {
-        let dialog = gtk::AlertDialog::builder()
+    fn show_folder_properties(self: &Rc<Self>, location: &Location) {
+        self.show_properties(location.clone(), None);
+    }
+
+    fn show_entry_properties(self: &Rc<Self>, entry: FileEntry) {
+        self.show_properties(entry.location.clone(), Some(entry));
+    }
+
+    fn show_properties(self: &Rc<Self>, location: Location, entry: Option<FileEntry>) {
+        let Some(parent) = self.overlay.root().and_downcast::<gtk::Window>() else {
+            return;
+        };
+        let blurred_root = parent
+            .child()
+            .and_downcast::<gtk::Overlay>()
+            .and_then(|overlay| overlay.child())
+            .and_downcast::<BlurBin>();
+        if let Some(root) = blurred_root.as_ref() {
+            root.set_blurred(true);
+        }
+        let is_directory = entry.as_ref().is_none_or(FileEntry::is_directory);
+        let name = entry
+            .as_ref()
+            .map(|entry| entry.display_name.clone())
+            .unwrap_or_else(|| location.display_name());
+        let icon_name = entry
+            .as_ref()
+            .map(entry_icon)
+            .unwrap_or(crate::assets::icons::FOLDER);
+
+        let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        content.add_css_class("properties-content");
+        let header = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+        header.add_css_class("properties-header");
+        let icon = crate::assets::primary_icon(icon_name, 30);
+        icon.add_css_class("properties-icon");
+        let heading = gtk::Box::new(gtk::Orientation::Vertical, 1);
+        heading.set_hexpand(true);
+        let title = gtk::Label::new(Some(&name));
+        title.add_css_class("properties-title");
+        title.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
+        title.set_xalign(0.0);
+        let kind = gtk::Label::new(Some(if is_directory { "Folder" } else { "File" }));
+        kind.add_css_class("properties-kind");
+        kind.set_xalign(0.0);
+        heading.append(&title);
+        heading.append(&kind);
+        let close = gtk::Button::new();
+        close.add_css_class("properties-close");
+        close.set_tooltip_text(Some("Close properties"));
+        close.set_child(Some(&crate::assets::primary_icon(
+            crate::assets::icons::X,
+            15,
+        )));
+        header.append(&icon);
+        header.append(&heading);
+        header.append(&close);
+        content.append(&header);
+
+        let details = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        details.add_css_class("properties-details");
+        let location_value = properties_row(&details, "LOCATION", &compact_display_path(&location));
+        location_value.set_tooltip_text(Some(&location.display_path()));
+        let initial_size = entry
+            .as_ref()
+            .and_then(|entry| match entry.size {
+                crate::model::MetadataValue::Known(size) => Some(format_file_size(size)),
+                crate::model::MetadataValue::Unknown | crate::model::MetadataValue::Unavailable => {
+                    None
+                }
+            })
+            .unwrap_or_else(|| "—".to_owned());
+        let size = properties_row(&details, "SIZE", &initial_size);
+        let modified = properties_row(
+            &details,
+            "MODIFIED",
+            &entry
+                .as_ref()
+                .map(metadata_modified)
+                .unwrap_or_else(|| "—".to_owned()),
+        );
+        let opens_with =
+            properties_row(&details, "OPENS WITH", if is_directory { "—" } else { "—" });
+        let hidden = properties_row(
+            &details,
+            "HIDDEN",
+            if name.starts_with('.') { "Yes" } else { "No" },
+        );
+        let _pinned = properties_row(&details, "PINNED", "No");
+        content.append(&details);
+
+        let permissions = gtk::Box::new(gtk::Orientation::Vertical, 8);
+        permissions.add_css_class("properties-permissions");
+        let permissions_header = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        let permissions_title = gtk::Label::new(Some("PERMISSIONS"));
+        permissions_title.add_css_class("properties-section-title");
+        permissions_title.set_xalign(0.0);
+        permissions_title.set_hexpand(true);
+        let permissions_mode = gtk::Label::new(Some("—"));
+        permissions_mode.add_css_class("properties-mode");
+        permissions_header.append(&permissions_title);
+        permissions_header.append(&permissions_mode);
+        permissions.append(&permissions_header);
+        let owner = permission_row(&permissions, "Owner");
+        let group = permission_row(&permissions, "Group");
+        let others = permission_row(&permissions, "Others");
+        content.append(&permissions);
+
+        let actions = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        actions.add_css_class("properties-actions");
+        let open = properties_action(crate::assets::icons::EXTERNAL_LINK, "Open");
+        let rename = properties_action(crate::assets::icons::PENCIL, "Rename");
+        rename.set_sensitive(entry.is_some());
+        let pin = properties_action(crate::assets::icons::PIN, "Pin");
+        pin.set_sensitive(false);
+        pin.set_tooltip_text(Some("Pinned locations are planned"));
+        let copy_path = properties_action(crate::assets::icons::COPY, "Copy path");
+        actions.append(&open);
+        actions.append(&rename);
+        actions.append(&pin);
+        actions.append(&copy_path);
+        content.append(&actions);
+
+        let dialog = gtk::Window::builder()
+            .decorated(false)
             .modal(true)
-            .message(location.display_name())
-            .detail(format!(
-                "Type: Folder\nLocation: {}",
-                location.display_path()
-            ))
+            .resizable(false)
+            .transient_for(&parent)
+            .child(&content)
             .build();
-        let window = self.overlay.root().and_downcast::<gtk::Window>();
-        dialog.show(window.as_ref());
+        dialog.add_css_class("properties-dialog");
+        if let Some(root) = blurred_root {
+            dialog.connect_close_request(move |_| {
+                root.set_blurred(false);
+                glib::Propagation::Proceed
+            });
+        }
+        let closing = dialog.clone();
+        close.connect_clicked(move |_| closing.close());
+        let opening = dialog.clone();
+        let opening_location = location.clone();
+        open.connect_clicked(move |_| {
+            open_location(&opening_location, &opening);
+            opening.close();
+        });
+        let renamed_dialog = dialog.clone();
+        let weak = Rc::downgrade(self);
+        rename.connect_clicked(move |_| {
+            renamed_dialog.close();
+            let weak = weak.clone();
+            glib::idle_add_local_once(move || {
+                if let Some(state) = weak.upgrade() {
+                    state.begin_rename();
+                }
+            });
+        });
+        let copied_location = location.clone();
+        copy_path.connect_clicked(move |button| {
+            if let Some(display) = gtk::gdk::Display::default() {
+                display
+                    .clipboard()
+                    .set_text(&copied_location.display_path());
+                button.set_label("Copied");
+            }
+        });
+        let escape = gtk::EventControllerKey::new();
+        let escaped = dialog.clone();
+        escape.connect_key_pressed(move |_, key, _, _| {
+            if key == gtk::gdk::Key::Escape {
+                escaped.close();
+                glib::Propagation::Stop
+            } else {
+                glib::Propagation::Proceed
+            }
+        });
+        dialog.add_controller(escape);
+        dialog.present();
+
+        let file = gio_file_for_location(&location);
+        glib::MainContext::default().spawn_local(async move {
+            let Ok(info) = file
+                .query_info_future(
+                    "standard::content-type,standard::is-hidden,standard::size,time::modified,unix::mode,owner::user,owner::group",
+                    gio::FileQueryInfoFlags::NOFOLLOW_SYMLINKS,
+                    glib::Priority::DEFAULT,
+                )
+                .await
+            else {
+                return;
+            };
+            if !is_directory {
+                size.set_text(&format_file_size(info.size().max(0) as u64));
+            }
+            if let Some(time) = info.modification_date_time() {
+                modified.set_text(
+                    &time
+                        .format("%Y-%m-%d %H:%M")
+                        .map(|value| value.to_string())
+                        .unwrap_or_else(|_| "—".to_owned()),
+                );
+            }
+            hidden.set_text(if info.is_hidden() { "Yes" } else { "No" });
+            if let Some(content_type) = info.content_type() {
+                kind.set_text(&gio::content_type_get_description(&content_type));
+                if let Some(app) = gio::AppInfo::default_for_type(&content_type, false) {
+                    opens_with.set_text(&app.display_name());
+                }
+            }
+            let mode = info.attribute_uint32("unix::mode");
+            if mode != 0 {
+                permissions_mode.set_text(&format_permissions(mode));
+                set_permission_row(&owner, mode, 6);
+                set_permission_row(&group, mode, 3);
+                set_permission_row(&others, mode, 0);
+            }
+            owner.0.set_text(info.attribute_string("owner::user").as_deref().unwrap_or("—"));
+            group.0.set_text(info.attribute_string("owner::group").as_deref().unwrap_or("—"));
+        });
     }
 
     fn begin_rename(&self) -> bool {
@@ -1594,6 +1804,15 @@ impl ViewState {
 
         let presentation = LoadPresentation::new(&scroll, Some(retry));
         install_folder_context_menu(self, &presentation.stack, &list, depth, location.clone());
+        install_item_context_menu(
+            self,
+            &list,
+            &selection,
+            &bound_rows,
+            &model,
+            &filtered_model,
+            depth,
+        );
         column.append(&new_folder_row);
         column.append(&presentation.stack);
 
@@ -2155,6 +2374,132 @@ fn install_folder_context_menu(
     parent.add_controller(menu_click);
 }
 
+fn install_item_context_menu(
+    state: &Rc<ViewState>,
+    list: &gtk::ListView,
+    selection: &gtk::MultiSelection,
+    bound_rows: &Rc<RefCell<Vec<BoundRow>>>,
+    source: &gtk::StringList,
+    filtered: &gtk::FilterListModel,
+    depth: usize,
+) {
+    let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    content.add_css_class("folder-context-menu");
+    let open = context_menu_option("Open", None);
+    let rename = context_menu_option("Rename", Some("F2"));
+    let properties = context_menu_option("Properties", None);
+    content.append(&open);
+    content.append(&rename);
+    content.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
+    content.append(&properties);
+    let popover = gtk::Popover::builder()
+        .child(&content)
+        .autohide(true)
+        .has_arrow(false)
+        .build();
+    popover.add_css_class("folder-context-popover");
+    popover.set_parent(list);
+
+    let target = Rc::new(RefCell::new(None::<(usize, FileEntry)>));
+    let weak = Rc::downgrade(state);
+    let open_target = target.clone();
+    let open_popover = popover.downgrade();
+    open.connect_clicked(move |_| {
+        if let Some(popover) = open_popover.upgrade() {
+            popover.popdown();
+        }
+        let Some((position, _)) = open_target.borrow().clone() else {
+            return;
+        };
+        if let Some(state) = weak.upgrade() {
+            state.browser.activate(depth, position);
+        }
+    });
+    let weak = Rc::downgrade(state);
+    let rename_target = target.clone();
+    let rename_popover = popover.downgrade();
+    rename.connect_clicked(move |_| {
+        if let Some(popover) = rename_popover.upgrade() {
+            popover.popdown();
+        }
+        let Some((position, _)) = rename_target.borrow().clone() else {
+            return;
+        };
+        let weak = weak.clone();
+        glib::idle_add_local_once(move || {
+            if let Some(state) = weak.upgrade() {
+                state.browser.select(depth, position);
+                state.begin_rename();
+            }
+        });
+    });
+    let weak = Rc::downgrade(state);
+    let properties_target = target.clone();
+    let properties_popover = popover.downgrade();
+    properties.connect_clicked(move |_| {
+        if let Some(popover) = properties_popover.upgrade() {
+            popover.popdown();
+        }
+        let Some((_, entry)) = properties_target.borrow().clone() else {
+            return;
+        };
+        if let Some(state) = weak.upgrade() {
+            state.show_entry_properties(entry);
+        }
+    });
+
+    let click = gtk::GestureClick::new();
+    click.set_button(3);
+    let weak_state = Rc::downgrade(state);
+    let weak_popover = popover.downgrade();
+    let rows = bound_rows.clone();
+    let selection = selection.clone();
+    let source = source.clone();
+    let filtered = filtered.clone();
+    click.connect_pressed(move |gesture, _, x, y| {
+        let Some(picked) = gesture
+            .widget()
+            .and_then(|widget| widget.pick(x, y, gtk::PickFlags::DEFAULT))
+            .and_then(file_row_target)
+        else {
+            return;
+        };
+        let filtered_position = rows.borrow().iter().find_map(|bound| {
+            let row = bound.row.upgrade()?;
+            let item = bound.item.upgrade()?;
+            (row == picked).then_some(item.position())
+        });
+        let Some(filtered_position) = filtered_position else {
+            return;
+        };
+        let Some(source_position) =
+            source_position_for_filtered(&source, &filtered, filtered_position)
+        else {
+            return;
+        };
+        let Some(state) = weak_state.upgrade() else {
+            return;
+        };
+        let Some(entry) = state.browser.entry_at(depth, source_position) else {
+            return;
+        };
+        gesture.set_state(gtk::EventSequenceState::Claimed);
+        selection.select_item(filtered_position, true);
+        target.replace(Some((source_position, entry)));
+        let Some(popover) = weak_popover.upgrade() else {
+            return;
+        };
+        popover.set_pointing_to(Some(&gtk::gdk::Rectangle::new(
+            x.round() as i32,
+            y.round() as i32,
+            1,
+            1,
+        )));
+        popover.popup();
+    });
+    list.add_controller(click);
+}
+
 fn context_menu_option(label: &str, accelerator: Option<&str>) -> gtk::Button {
     let button = gtk::Button::new();
     button.add_css_class("folder-context-option");
@@ -2276,19 +2621,20 @@ fn column_menu_option(label: &str, selected: bool) -> (gtk::Button, gtk::Image) 
     (option, check)
 }
 
-fn is_file_row_target(mut target: gtk::Widget) -> bool {
+fn file_row_target(mut target: gtk::Widget) -> Option<gtk::Box> {
     loop {
         if target.has_css_class("file-row") {
-            return true;
+            return target.downcast::<gtk::Box>().ok();
         }
         if target.is::<gtk::ListView>() {
-            return false;
+            return None;
         }
-        let Some(parent) = target.parent() else {
-            return false;
-        };
-        target = parent;
+        target = target.parent()?;
     }
+}
+
+fn is_file_row_target(target: gtk::Widget) -> bool {
+    file_row_target(target).is_some()
 }
 
 fn is_breadcrumb_target(mut target: gtk::Widget) -> bool {
@@ -2493,11 +2839,134 @@ fn animate_horizontal_scroll(
     });
 }
 
-fn open_location(location: &Location, parent: &impl IsA<gtk::Widget>) {
-    let file = location
+fn gio_file_for_location(location: &Location) -> gio::File {
+    location
         .native_path()
         .map(gio::File::for_path)
-        .unwrap_or_else(|| gio::File::for_uri(location.uri_value().unwrap_or_default()));
+        .unwrap_or_else(|| gio::File::for_uri(location.uri_value().unwrap_or_default()))
+}
+
+fn compact_display_path(location: &Location) -> String {
+    let Some(path) = location.native_path() else {
+        return location.display_path();
+    };
+    let home = glib::home_dir();
+    if path == home {
+        return "~".to_owned();
+    }
+    path.strip_prefix(&home)
+        .ok()
+        .map(|suffix| format!("~/{}", suffix.to_string_lossy()))
+        .unwrap_or_else(|| location.display_path())
+}
+
+fn metadata_modified(entry: &FileEntry) -> String {
+    let crate::model::MetadataValue::Known(seconds) = entry.modified_unix_seconds else {
+        return "—".to_owned();
+    };
+    glib::DateTime::from_unix_local(seconds)
+        .and_then(|date| date.format("%Y-%m-%d %H:%M"))
+        .map(|value| value.to_string())
+        .unwrap_or_else(|_| "—".to_owned())
+}
+
+fn properties_row(parent: &gtk::Box, label: &str, value: &str) -> gtk::Label {
+    let row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+    row.add_css_class("properties-row");
+    let label = gtk::Label::new(Some(label));
+    label.add_css_class("properties-row-label");
+    label.set_xalign(0.0);
+    let value = gtk::Label::new(Some(value));
+    value.add_css_class("properties-row-value");
+    value.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
+    value.set_hexpand(true);
+    value.set_xalign(0.0);
+    row.append(&label);
+    row.append(&value);
+    parent.append(&row);
+    value
+}
+
+type PermissionRow = (gtk::Label, [gtk::Label; 3]);
+
+fn permission_row(parent: &gtk::Box, label: &str) -> PermissionRow {
+    let row = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+    row.add_css_class("properties-permission-row");
+    let title = gtk::Label::new(Some(label));
+    title.add_css_class("properties-permission-title");
+    title.set_xalign(0.0);
+    let identity = gtk::Label::new(Some("—"));
+    identity.add_css_class("properties-permission-identity");
+    identity.set_xalign(0.0);
+    let spacer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    spacer.set_hexpand(true);
+    let read = gtk::Label::new(Some("—"));
+    let write = gtk::Label::new(Some("—"));
+    let execute = gtk::Label::new(Some("—"));
+    for permission in [&read, &write, &execute] {
+        permission.add_css_class("properties-permission-bit");
+        permission.set_width_chars(2);
+    }
+    row.append(&title);
+    row.append(&identity);
+    row.append(&spacer);
+    row.append(&read);
+    row.append(&write);
+    row.append(&execute);
+    parent.append(&row);
+    (identity, [read, write, execute])
+}
+
+fn set_permission_row(row: &PermissionRow, mode: u32, shift: u32) {
+    let value = (mode >> shift) & 0o7;
+    row.1[0].set_text(if value & 0o4 != 0 { "r" } else { "—" });
+    row.1[1].set_text(if value & 0o2 != 0 { "w" } else { "—" });
+    row.1[2].set_text(if value & 0o1 != 0 { "x" } else { "—" });
+    for (index, permission) in row.1.iter().enumerate() {
+        let enabled = value & [0o4, 0o2, 0o1][index] != 0;
+        if enabled {
+            permission.add_css_class("enabled");
+        } else {
+            permission.remove_css_class("enabled");
+        }
+    }
+}
+
+fn format_permissions(mode: u32) -> String {
+    let kind = if mode & 0o170000 == 0o040000 {
+        'd'
+    } else {
+        '-'
+    };
+    let mut symbolic = String::with_capacity(10);
+    symbolic.push(kind);
+    for (mask, character) in [
+        (0o400, 'r'),
+        (0o200, 'w'),
+        (0o100, 'x'),
+        (0o040, 'r'),
+        (0o020, 'w'),
+        (0o010, 'x'),
+        (0o004, 'r'),
+        (0o002, 'w'),
+        (0o001, 'x'),
+    ] {
+        symbolic.push(if mode & mask != 0 { character } else { '-' });
+    }
+    format!("{symbolic}  {:03o}", mode & 0o777)
+}
+
+fn properties_action(icon: &str, label: &str) -> gtk::Button {
+    let content = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+    content.append(&crate::assets::primary_icon(icon, 14));
+    content.append(&gtk::Label::new(Some(label)));
+    let button = gtk::Button::builder().child(&content).build();
+    button.add_css_class("properties-action");
+    button
+}
+
+fn open_location(location: &Location, parent: &impl IsA<gtk::Widget>) {
+    let file = gio_file_for_location(location);
     let uri = file.uri();
     if let Err(error) = gio::AppInfo::launch_default_for_uri(&uri, None::<&gio::AppLaunchContext>) {
         tracing::warn!(location = %location.display_path(), error = %error, "unable to open file");
