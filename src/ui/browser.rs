@@ -2863,11 +2863,11 @@ impl ViewState {
                 }),
             );
             if let Some(entry) = entry.as_ref() {
-                crate::assets::set_primary_icon(&icon, entry_icon(entry));
+                super::thumbnail::set_thumbnail_or_icon(&icon, entry, entry_icon(entry), 17, 17);
                 icon.set_opacity(if entry.is_directory() { 1.0 } else { 0.72 });
                 chevron.set_visible(entry.is_directory());
             } else {
-                crate::assets::set_primary_icon(&icon, crate::assets::icons::DOCUMENTS);
+                super::thumbnail::show_fallback_icon(&icon, crate::assets::icons::DOCUMENTS, 17);
                 icon.set_opacity(0.72);
                 chevron.set_visible(false);
             }

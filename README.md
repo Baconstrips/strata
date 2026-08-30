@@ -48,6 +48,99 @@ Strata is an experimental, keyboard-first file manager for Linux. It is designed
 - GIO
 - Native Wayland support
 
+## Install a precompiled release
+
+Strata is not yet available through Arch's package repositories. Download the archive and matching `.sha256` file for your CPU from the [latest release](https://github.com/LGSE/strata/releases/latest):
+
+- `x86_64-unknown-linux-gnu` for Intel and AMD PCs
+- `aarch64-unknown-linux-gnu` for ARM64 PCs
+
+Install the runtime libraries and optional video-thumbnail helper on Arch or Omarchy:
+
+```bash
+sudo pacman -S --needed fontconfig gtk4 gtksourceview5 poppler-glib ffmpegthumbnailer
+```
+
+Then verify, extract, and install the downloaded archive (replace the filename with the release you downloaded):
+
+```bash
+cd ~/Downloads
+sha256sum --check strata-<version>-<target>.tar.gz.sha256
+tar -xzf strata-<version>-<target>.tar.gz
+install -Dm755 strata-<version>-<target>/strata ~/.local/bin/strata
+```
+
+Ensure `~/.local/bin` is on `PATH`, then run `strata`. Image thumbnails work without `ffmpegthumbnailer`; when that optional program is unavailable, video files fall back to their video icon.
+
+### Desktop integration
+
+Create a per-user desktop entry so launchers and `xdg-open` can discover Strata:
+
+```bash
+mkdir -p ~/.local/share/applications
+cat > ~/.local/share/applications/io.github.lgse.Strata.desktop <<EOF
+[Desktop Entry]
+Name=Strata
+Comment=Navigate every layer
+Exec=$HOME/.local/bin/strata %U
+Icon=system-file-manager
+Terminal=false
+Type=Application
+Categories=Utility;FileManager;
+MimeType=inode/directory;
+StartupNotify=true
+EOF
+update-desktop-database ~/.local/share/applications
+xdg-mime default io.github.lgse.Strata.desktop inode/directory
+```
+
+Confirm the association with:
+
+```bash
+xdg-mime query default inode/directory
+```
+
+It should print `io.github.lgse.Strata.desktop`.
+
+### Make Strata the Omarchy file manager
+
+The XDG association above makes folders opened by desktop applications use Strata. To also replace Omarchy's <kbd>Super</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd> shortcut, use the instructions for your Omarchy generation.
+
+#### Omarchy Quattro
+
+Add these overrides to `~/.config/hypr/bindings.lua`:
+
+```lua
+hl.unbind("SUPER + SHIFT + F")
+hl.unbind("SUPER + ALT + SHIFT + F")
+o.bind("SUPER + SHIFT + F", "File manager", "uwsm app -- strata")
+o.bind("SUPER + ALT + SHIFT + F", "File manager (cwd)",
+  "uwsm app -- strata \"$(omarchy-cmd-terminal-cwd)\"")
+```
+
+Apply and validate the configuration:
+
+```bash
+hyprctl reload
+hyprctl configerrors
+```
+
+#### Omarchy 3
+
+In `~/.config/hypr/bindings.conf`, replace the existing Nautilus file-manager binding with:
+
+```ini
+bindd = SUPER SHIFT, F, File manager, exec, uwsm app -- strata
+```
+
+Optionally add a shortcut that opens the active terminal's working directory:
+
+```ini
+bindd = SUPER SHIFT ALT, F, File manager (cwd), exec, uwsm app -- strata "$(omarchy-cmd-terminal-cwd)"
+```
+
+Then run `hyprctl reload` and `hyprctl configerrors`.
+
 ## Technical highlights
 
 Strata is built around a small application model rather than placing filesystem logic in GTK widgets:

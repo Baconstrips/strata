@@ -7,6 +7,7 @@ mod motion;
 mod preview;
 mod settings;
 mod theme;
+mod thumbnail;
 mod window;
 
 pub use window::{present, present_location};

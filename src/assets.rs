@@ -133,6 +133,14 @@ pub fn set_primary_icon_color(color: &str) {
     PRIMARY_ICONS.with(|icons| recolor_registered_icons(icons, color));
 }
 
+pub fn remove_primary_icon(image: &gtk::Image) {
+    PRIMARY_ICONS.with(|icons| {
+        icons
+            .borrow_mut()
+            .retain(|icon| icon.image.upgrade().as_ref() != Some(image));
+    });
+}
+
 pub fn text_icon(name: &str, pixel_size: i32) -> gtk::Image {
     let image = gtk::Image::new();
     image.set_pixel_size(pixel_size);

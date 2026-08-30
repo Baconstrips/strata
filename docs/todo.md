@@ -219,10 +219,10 @@ Legend: **P0** blocks the milestone, **P1** is required for its exit criteria, *
 
 ### Thumbnails
 
-- [ ] **P0** Generate asynchronous file-list thumbnails for mainstream image formats
-- [ ] **P0** Generate representative file-list thumbnails for mainstream video formats
+- [x] **P0** Generate asynchronous file-list thumbnails for mainstream image formats
+- [x] **P0** Generate representative file-list thumbnails for mainstream video formats
 - [ ] **P0** Keep thumbnail decoding, scaling, and delivery cancellable, bounded, and stale-result-safe
-- [ ] **P0** Fall back cleanly to semantic file icons when thumbnails are disabled, unavailable, malformed, or still loading
+- [x] **P0** Fall back cleanly to semantic file icons when thumbnails are disabled, unavailable, malformed, or still loading
 - [ ] **P1** Add a “Show file previews” preference, with explanatory text that thumbnail generation can increase CPU and disk activity
 - [ ] **P1** Apply the thumbnail preference live without restarting or blocking navigation
 - [ ] **P1** Integrate generated thumbnails with the Freedesktop-compatible thumbnail cache

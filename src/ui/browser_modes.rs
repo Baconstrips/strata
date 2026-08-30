@@ -745,7 +745,13 @@ fn build_grid_pane(
             set_mode_cut_style(&card, cuts_for_bind.borrow().contains(&entry.location));
             label.set_label(&entry.display_name);
             label.set_tooltip_text(Some(&entry.display_name));
-            crate::assets::set_primary_icon(&icon, super::browser::entry_icon(&entry));
+            super::thumbnail::set_thumbnail_or_icon(
+                &icon,
+                &entry,
+                super::browser::entry_icon(&entry),
+                26,
+                64,
+            );
             icon.set_opacity(if entry.is_directory() { 1.0 } else { 0.72 });
         }
     });
@@ -1131,7 +1137,13 @@ fn build_explorer_pane(
             .and_then(|browser| browser.entry_at(depth, item.position() as usize));
         if let Some(entry) = entry {
             set_mode_cut_style(&row, cuts_for_bind.borrow().contains(&entry.location));
-            crate::assets::set_primary_icon(&icon, super::browser::entry_icon(&entry));
+            super::thumbnail::set_thumbnail_or_icon(
+                &icon,
+                &entry,
+                super::browser::entry_icon(&entry),
+                18,
+                18,
+            );
             name.set_label(&entry.display_name);
             size.set_label(&entry_size(&entry));
             kind.set_label(entry_type(&entry));
