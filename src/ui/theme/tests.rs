@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use super::{blend, slugify, title_case_slug, tokens_from_quattro};
+use super::{Preferences, blend, slugify, title_case_slug, tokens_from_quattro};
 
 #[test]
 fn names_become_safe_config_file_slugs() {
@@ -41,4 +41,31 @@ color8 = "#123247"
 #[test]
 fn legacy_palette_without_quattro_semantics_is_not_detected() {
     assert!(tokens_from_quattro("legacy", "color4 = \"#00aaff\"").is_none());
+}
+
+#[test]
+fn legacy_preferences_enable_single_click_previews_by_default() {
+    let preferences: Preferences = toml::from_str(
+        r#"
+mode = "theme"
+theme = "azure-glow"
+"#,
+    )
+    .expect("legacy preferences should remain valid");
+
+    assert!(preferences.single_click_previews);
+}
+
+#[test]
+fn single_click_previews_can_be_disabled_in_preferences() {
+    let preferences: Preferences = toml::from_str(
+        r#"
+mode = "theme"
+theme = "azure-glow"
+single_click_previews = false
+"#,
+    )
+    .expect("preferences should be valid");
+
+    assert!(!preferences.single_click_previews);
 }

@@ -68,6 +68,8 @@ pub struct Theme {
 struct Preferences {
     mode: String,
     theme: String,
+    #[serde(default = "default_enabled")]
+    single_click_previews: bool,
 }
 
 impl Default for Preferences {
@@ -75,8 +77,13 @@ impl Default for Preferences {
         Self {
             mode: "theme".to_owned(),
             theme: "azure-glow".to_owned(),
+            single_click_previews: true,
         }
     }
+}
+
+fn default_enabled() -> bool {
+    true
 }
 
 pub struct ThemeManager {
@@ -142,6 +149,15 @@ impl ThemeManager {
 
     pub fn selected_id(&self) -> String {
         self.preferences.borrow().theme.clone()
+    }
+
+    pub fn single_click_previews(&self) -> bool {
+        self.preferences.borrow().single_click_previews
+    }
+
+    pub fn set_single_click_previews(&self, enabled: bool) {
+        self.preferences.borrow_mut().single_click_previews = enabled;
+        self.save_preferences();
     }
 
     pub fn select_theme(&self, id: &str) {

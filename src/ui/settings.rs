@@ -65,7 +65,7 @@ pub fn build_layer(
         .hexpand(true)
         .vexpand(true)
         .build();
-    stack.add_named(&general_page(browser), Some("general"));
+    stack.add_named(&general_page(browser, themes.clone()), Some("general"));
     stack.add_named(&keybindings_page(), Some("keybindings"));
     stack.add_named(&theme_page(themes), Some("theme"));
     page.append(&stack);
@@ -131,7 +131,7 @@ fn hide(layer: &gtk::Box, button: &gtk::Button, root: &BlurBin) {
     button.remove_css_class("active");
 }
 
-fn general_page(browser: &BrowserView) -> gtk::Widget {
+fn general_page(browser: &BrowserView, manager: Rc<ThemeManager>) -> gtk::Widget {
     let preferences = page_content();
     append_heading(&preferences, "BROWSING");
     let (peeking_row, peeking) = settings_option(
@@ -139,9 +139,27 @@ fn general_page(browser: &BrowserView) -> gtk::Widget {
         "Preview folders automatically while moving through a pane.",
         true,
     );
-    let browser = browser.clone();
-    peeking.connect_active_notify(move |toggle| browser.set_peek_enabled(toggle.is_active()));
+    let browser_for_peeking = browser.clone();
+    peeking.connect_active_notify(move |toggle| {
+        browser_for_peeking.set_peek_enabled(toggle.is_active())
+    });
     preferences.append(&peeking_row);
+
+    let single_click_enabled = manager.single_click_previews();
+    browser.set_single_click_previews(single_click_enabled);
+    let (preview_row, single_click_previews) = settings_option(
+        "Single-click file previews",
+        "Show a quick preview when selecting a supported file.",
+        single_click_enabled,
+    );
+    let browser_for_previews = browser.clone();
+    single_click_previews.connect_active_notify(move |toggle| {
+        let enabled = toggle.is_active();
+        browser_for_previews.set_single_click_previews(enabled);
+        manager.set_single_click_previews(enabled);
+    });
+    preferences.append(&preview_row);
+
     append_heading(&preferences, "MOTION");
     let (motion_row, reduce_motion) = settings_option(
         "Reduce motion",

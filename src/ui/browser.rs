@@ -205,6 +205,7 @@ struct ViewState {
     peek_anchor: RefCell<Option<gtk::Widget>>,
     peek_behavior: PeekBehavior,
     peek_enabled: Cell<bool>,
+    single_click_previews: Cell<bool>,
     active_rename: RefCell<Option<ActiveRename>>,
     active_new_folder: RefCell<Option<ActiveNewFolder>>,
     delete_progress: RefCell<Option<DeleteProgressView>>,
@@ -308,6 +309,7 @@ impl BrowserView {
             peek_anchor: RefCell::new(None),
             peek_behavior,
             peek_enabled: Cell::new(true),
+            single_click_previews: Cell::new(true),
             active_rename: RefCell::new(None),
             active_new_folder: RefCell::new(None),
             delete_progress: RefCell::new(None),
@@ -433,6 +435,10 @@ impl BrowserView {
             cancel_source(&self.state.pending_peek);
             self.state.browser.close_peek();
         }
+    }
+
+    pub fn set_single_click_previews(&self, enabled: bool) {
+        self.state.single_click_previews.set(enabled);
     }
 
     pub fn create_new_folder(&self) {
@@ -2675,7 +2681,12 @@ impl ViewState {
                     if press_count == 2 {
                         state.browser.activate(depth, source_position);
                     } else if !control && !shift && !preserve_group {
-                        state.browser.preview(depth, source_position);
+                        let entry = state.browser.entry_at(depth, source_position);
+                        if entry.as_ref().is_some_and(|entry| {
+                            entry_responds_to_single_click(entry, state.single_click_previews.get())
+                        }) {
+                            state.browser.preview(depth, source_position);
+                        }
                     }
                 }
             });
@@ -3825,6 +3836,10 @@ fn install_item_context_menu(
         popover.popup();
     });
     list.add_controller(click);
+}
+
+fn entry_responds_to_single_click(entry: &FileEntry, previews_enabled: bool) -> bool {
+    entry.is_directory() || (previews_enabled && entry_supports_quick_preview(entry))
 }
 
 fn entry_supports_quick_preview(entry: &FileEntry) -> bool {

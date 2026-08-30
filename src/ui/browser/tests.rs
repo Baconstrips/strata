@@ -66,6 +66,14 @@ fn quick_preview_is_offered_only_for_supported_files() {
         "photos.png",
         crate::model::EntryKind::Directory,
     )));
+
+    let supported = entry("photo.png", crate::model::EntryKind::File);
+    let unsupported = entry("archive.zip", crate::model::EntryKind::File);
+    let directory = entry("photos", crate::model::EntryKind::Directory);
+    assert!(entry_responds_to_single_click(&supported, true));
+    assert!(!entry_responds_to_single_click(&supported, false));
+    assert!(!entry_responds_to_single_click(&unsupported, true));
+    assert!(entry_responds_to_single_click(&directory, false));
 }
 
 #[test]
