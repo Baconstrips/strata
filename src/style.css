@@ -633,6 +633,80 @@ headerbar menubutton.header-action > button:focus-visible image {
   font-size: 0.88em;
 }
 
+.about-page {
+  color: @theme_text;
+}
+
+.about-identity {
+  color: @theme_text;
+  margin: 8px 24px 14px;
+}
+
+.about-name {
+  color: @theme_text;
+  font-size: 1.55em;
+  font-weight: 800;
+}
+
+.about-description {
+  color: @theme_dim_text;
+}
+
+.about-details {
+  background: alpha(@theme_bg, 0.55);
+  border: 1px solid alpha(@theme_border, 0.24);
+  border-radius: 6px;
+  color: @theme_text;
+}
+
+.about-detail-row {
+  border-bottom: 1px solid alpha(@theme_border, 0.2);
+  min-height: 42px;
+  padding: 4px 14px;
+}
+
+.about-detail-label {
+  color: @theme_dim_text;
+}
+
+.about-detail-value {
+  color: @theme_text;
+  font-weight: 700;
+}
+
+.about-detail-value selection {
+  background: @theme_accent;
+  color: @theme_bg;
+}
+
+.about-repository,
+.about-repository:link,
+.about-repository:visited {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  color: @theme_accent;
+  min-height: 42px;
+  padding: 4px 14px;
+  text-decoration: none;
+}
+
+.about-repository:hover {
+  background: alpha(@theme_muted, 0.55);
+  color: @theme_text;
+}
+
+.about-repository:active {
+  background: alpha(@theme_highlight, 0.72);
+  color: @theme_accent;
+}
+
+.about-repository:focus-visible {
+  outline: 2px solid @theme_accent;
+  outline-offset: -2px;
+}
+
 switch {
   background: @theme_muted;
   border: 1px solid alpha(@theme_border, 0.72);
