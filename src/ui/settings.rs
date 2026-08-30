@@ -16,13 +16,13 @@ use crate::{
 
 use super::{
     blur::BlurBin,
-    browser::BrowserView,
+    browser::{BrowserView, dismiss_modal_layer, modal_layer},
     motion::set_reduce_motion,
     theme::{Theme, ThemeManager, ThemeTokens},
 };
 
 type ThemeCards = Rc<RefCell<Vec<(String, gtk::Button, gtk::Image)>>>;
-pub(super) type UpdateNoticeHandler = Rc<dyn Fn(Option<(String, String)>)>;
+pub(super) type UpdateNoticeHandler = Rc<dyn Fn(Option<(String, String, String)>)>;
 
 pub fn build_layer(
     browser: &BrowserView,
@@ -249,6 +249,11 @@ fn update_check_row(
     status.add_css_class("settings-option-description");
     copy.append(&title);
     copy.append(&status);
+    let progress = gtk::ProgressBar::new();
+    progress.add_css_class("settings-update-progress");
+    progress.set_hexpand(true);
+    progress.set_visible(false);
+    copy.append(&progress);
     let button = gtk::Button::with_label("Check now");
     button.add_css_class("settings-update-check");
     button.set_valign(gtk::Align::Center);
@@ -270,6 +275,7 @@ fn update_check_row(
         let update_notice = update_notice.clone();
         let pending_download = pending_download.clone();
         let installed = installed.clone();
+        let progress = progress.clone();
         move || {
             if checking.replace(true) {
                 return;
@@ -277,6 +283,9 @@ fn update_check_row(
             *pending_download.borrow_mut() = None;
             installed.set(false);
             button.set_label("Check now");
+            progress.set_fraction(0.0);
+            progress.set_visible(false);
+            progress.remove_css_class("error");
             status.set_text("Checking for updates…");
             button.set_sensitive(false);
             let receiver = services::check_for_updates(env!("CARGO_PKG_VERSION"));
@@ -291,10 +300,16 @@ fn update_check_row(
                     Ok(result) => {
                         status.set_markup(&update_check_message(&result));
                         match &result {
-                            UpdateCheck::Available { version, url, .. }
-                                if manager.checks_for_updates() =>
-                            {
-                                update_notice(Some((version.clone(), url.clone())));
+                            UpdateCheck::Available {
+                                version,
+                                url,
+                                download_url: Some(download_url),
+                            } if manager.checks_for_updates() => {
+                                update_notice(Some((
+                                    version.clone(),
+                                    url.clone(),
+                                    download_url.clone(),
+                                )));
                             }
                             UpdateCheck::UpToDate => update_notice(None),
                             UpdateCheck::Available { .. } | UpdateCheck::Failed(_) => {}
@@ -333,37 +348,65 @@ fn update_check_row(
             if checking.replace(true) {
                 return;
             }
-            status.set_text("Installing update…");
+            status.set_text("Downloading update…");
+            progress.set_fraction(0.0);
+            progress.set_visible(true);
+            progress.remove_css_class("error");
             button.set_sensitive(false);
             let receiver = services::install_update(download_url);
             let checking = checking.clone();
             let status = status.clone();
             let button = button.clone();
             let installed = installed.clone();
+            let progress = progress.clone();
             glib::timeout_add_local(Duration::from_millis(100), move || {
-                match receiver.try_recv() {
-                    Ok(UpdateInstall::Installed) => {
-                        status.set_text("Update installed — restart to apply");
-                        button.set_label("Restart now");
-                        button.set_sensitive(true);
-                        installed.set(true);
-                        checking.set(false);
-                        glib::ControlFlow::Break
-                    }
-                    Ok(UpdateInstall::Failed(message)) => {
-                        status.set_text(&format!("Couldn't install update: {message}"));
-                        button.set_label("Check now");
-                        button.set_sensitive(true);
-                        checking.set(false);
-                        glib::ControlFlow::Break
-                    }
-                    Err(TryRecvError::Empty) => glib::ControlFlow::Continue,
-                    Err(TryRecvError::Disconnected) => {
-                        status.set_text("Couldn't install update");
-                        button.set_label("Check now");
-                        button.set_sensitive(true);
-                        checking.set(false);
-                        glib::ControlFlow::Break
+                loop {
+                    match receiver.try_recv() {
+                        Ok(UpdateInstall::Downloading { downloaded, total }) => {
+                            if let Some(total) = total.filter(|total| *total > 0) {
+                                let fraction = (downloaded as f64 / total as f64).clamp(0.0, 1.0);
+                                progress.set_fraction(fraction);
+                                status.set_text(&format!(
+                                    "Downloading update… {:.0}%",
+                                    fraction * 100.0
+                                ));
+                            } else {
+                                progress.pulse();
+                                status.set_text(&format!(
+                                    "Downloading update… {:.1} MB",
+                                    downloaded as f64 / 1_048_576.0
+                                ));
+                            }
+                        }
+                        Ok(UpdateInstall::Installing) => {
+                            progress.set_fraction(1.0);
+                            status.set_text("Verifying and installing update…");
+                        }
+                        Ok(UpdateInstall::Installed) => {
+                            status.set_text("Update installed — restart to apply");
+                            button.set_label("Restart now");
+                            button.set_sensitive(true);
+                            installed.set(true);
+                            checking.set(false);
+                            return glib::ControlFlow::Break;
+                        }
+                        Ok(UpdateInstall::Failed(message)) => {
+                            status.set_text(&format!("Couldn't install update: {message}"));
+                            progress.add_css_class("error");
+                            button.set_label("Check now");
+                            button.set_sensitive(true);
+                            checking.set(false);
+                            return glib::ControlFlow::Break;
+                        }
+                        Err(TryRecvError::Empty) => return glib::ControlFlow::Continue,
+                        Err(TryRecvError::Disconnected) => {
+                            status.set_text("Couldn't install update");
+                            progress.add_css_class("error");
+                            button.set_label("Check now");
+                            button.set_sensitive(true);
+                            checking.set(false);
+                            return glib::ControlFlow::Break;
+                        }
                     }
                 }
             });
@@ -376,20 +419,197 @@ fn update_check_row(
 
 /// Relaunches the (just-updated) executable and quits the current instance.
 fn restart_application(button: &gtk::Button) {
-    let Ok(current_exe) = std::env::current_exe() else {
-        return;
-    };
-    if std::process::Command::new(current_exe).spawn().is_err() {
-        return;
-    }
     let application = button
         .root()
         .and_then(|root| root.downcast::<gtk::Window>().ok())
         .and_then(|window| window.application());
+    restart(application.as_ref());
+}
+
+fn restart(application: Option<&gtk::Application>) {
+    let Ok(mut current_exe) = std::env::current_exe() else {
+        return;
+    };
+    // On Linux, replacing the running executable makes /proc/self/exe resolve to
+    // the old path with " (deleted)" appended. Relaunch the replacement at the
+    // original path instead of treating that suffix as part of the filename.
+    if !current_exe.exists()
+        && let Some(path) = current_exe
+            .to_str()
+            .and_then(|path| path.strip_suffix(" (deleted)"))
+        && std::path::Path::new(path).is_file()
+    {
+        current_exe = path.into();
+    }
+    // Give GApplication time to release its single-instance bus name before the
+    // replacement starts. Starting it immediately only re-activates this process.
+    if std::process::Command::new("sh")
+        .args(["-c", "sleep 0.25; exec \"$1\"", "strata-restart"])
+        .arg(current_exe)
+        .spawn()
+        .is_err()
+    {
+        return;
+    }
     match application {
         Some(application) => application.quit(),
         None => std::process::exit(0),
     }
+}
+
+pub(super) fn show_update_dialog(parent: &gtk::Window, version: &str, download_url: String) {
+    let Some(window_overlay) = parent.child().and_downcast::<gtk::Overlay>() else {
+        return;
+    };
+    let blurred_root = window_overlay.child().and_downcast::<BlurBin>();
+    if let Some(root) = blurred_root.as_ref() {
+        root.set_blurred(true);
+    }
+
+    let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    content.add_css_class("transfer-dialog");
+    content.add_css_class("update-dialog");
+    content.set_halign(gtk::Align::Center);
+    content.set_valign(gtk::Align::Center);
+    let header = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+    header.add_css_class("update-dialog-header");
+    let symbol = gtk::CenterBox::new();
+    symbol.add_css_class("update-dialog-symbol");
+    symbol.set_size_request(40, 40);
+    symbol.set_valign(gtk::Align::Center);
+    symbol.set_center_widget(Some(&crate::assets::primary_icon(icons::DOWNLOADS, 20)));
+    let heading = gtk::Box::new(gtk::Orientation::Vertical, 2);
+    let title = gtk::Label::new(Some(&format!("Installing Strata v{version}")));
+    title.add_css_class("update-dialog-title");
+    title.set_xalign(0.0);
+    let subtitle = gtk::Label::new(Some(
+        "The update is downloaded and verified before installation.",
+    ));
+    subtitle.add_css_class("update-dialog-subtitle");
+    subtitle.set_xalign(0.0);
+    subtitle.set_wrap(true);
+    heading.append(&title);
+    heading.append(&subtitle);
+    header.append(&symbol);
+    header.append(&heading);
+    content.append(&header);
+
+    let body = gtk::Box::new(gtk::Orientation::Vertical, 10);
+    body.add_css_class("update-dialog-body");
+    let status = gtk::Label::new(Some(&format!("Strata v{version} is ready to download.")));
+    status.add_css_class("update-dialog-status");
+    status.set_xalign(0.0);
+    let progress = gtk::ProgressBar::new();
+    progress.add_css_class("update-dialog-progress");
+    progress.set_fraction(0.0);
+    progress.set_visible(false);
+    body.append(&status);
+    body.append(&progress);
+    content.append(&body);
+
+    let actions = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    actions.add_css_class("update-dialog-actions");
+    let spacer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    spacer.set_hexpand(true);
+    let cancel = gtk::Button::with_label("Cancel");
+    cancel.add_css_class("transfer-cancel");
+    let action = gtk::Button::with_label("Download update");
+    action.add_css_class("update-dialog-action");
+    actions.append(&spacer);
+    actions.append(&cancel);
+    actions.append(&action);
+    content.append(&actions);
+
+    let layer = modal_layer(&content);
+    window_overlay.add_overlay(&layer);
+    action.grab_focus();
+
+    let cancel_layer = layer.clone();
+    let cancel_overlay = window_overlay.clone();
+    let cancel_root = blurred_root.clone();
+    cancel.connect_clicked(move |_| {
+        dismiss_modal_layer(&cancel_layer, &cancel_overlay, cancel_root.as_ref());
+    });
+
+    let started = Rc::new(Cell::new(false));
+    let installed = Rc::new(Cell::new(false));
+    let action_layer = layer.clone();
+    let action_overlay = window_overlay.clone();
+    let action_root = blurred_root.clone();
+    let application = parent.application();
+    action.connect_clicked(move |button| {
+        if installed.get() {
+            restart(application.as_ref());
+            button.set_sensitive(false);
+            return;
+        }
+        if started.replace(true) {
+            dismiss_modal_layer(&action_layer, &action_overlay, action_root.as_ref());
+            button.set_sensitive(false);
+            return;
+        }
+
+        button.set_sensitive(false);
+        cancel.set_sensitive(false);
+        progress.set_visible(true);
+        status.set_text("Starting download…");
+        let receiver = services::install_update(download_url.clone());
+        let progress = progress.clone();
+        let status = status.clone();
+        let action = button.clone();
+        let installed = installed.clone();
+        glib::timeout_add_local(Duration::from_millis(100), move || {
+            loop {
+                match receiver.try_recv() {
+                    Ok(UpdateInstall::Downloading { downloaded, total }) => {
+                        if let Some(total) = total.filter(|total| *total > 0) {
+                            let fraction = (downloaded as f64 / total as f64).clamp(0.0, 1.0);
+                            progress.set_fraction(fraction);
+                            status.set_text(&format!(
+                                "Downloading… {:.0}%  ({:.1} of {:.1} MB)",
+                                fraction * 100.0,
+                                downloaded as f64 / 1_048_576.0,
+                                total as f64 / 1_048_576.0,
+                            ));
+                        } else {
+                            progress.pulse();
+                            status.set_text(&format!(
+                                "Downloading… {:.1} MB",
+                                downloaded as f64 / 1_048_576.0
+                            ));
+                        }
+                    }
+                    Ok(UpdateInstall::Installing) => {
+                        progress.set_fraction(1.0);
+                        status.set_text("Download complete — verifying and installing…");
+                    }
+                    Ok(UpdateInstall::Installed) => {
+                        progress.set_fraction(1.0);
+                        status.set_text("Update installed — restart to apply");
+                        action.set_label("Restart now");
+                        action.add_css_class("suggested-action");
+                        action.set_sensitive(true);
+                        installed.set(true);
+                        return glib::ControlFlow::Break;
+                    }
+                    Ok(UpdateInstall::Failed(message)) => {
+                        status.set_text(&format!("Couldn’t install update: {message}"));
+                        progress.add_css_class("error");
+                        action.set_label("Close");
+                        action.set_sensitive(true);
+                        return glib::ControlFlow::Break;
+                    }
+                    Err(TryRecvError::Empty) => return glib::ControlFlow::Continue,
+                    Err(TryRecvError::Disconnected) => {
+                        status.set_text("Couldn’t install update");
+                        action.set_label("Close");
+                        action.set_sensitive(true);
+                        return glib::ControlFlow::Break;
+                    }
+                }
+            }
+        });
+    });
 }
 
 fn update_check_message(result: &UpdateCheck) -> String {

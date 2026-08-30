@@ -5106,7 +5106,7 @@ fn entry_kind_summary(entries: &[FileEntry]) -> String {
     }
 }
 
-fn modal_layer(content: &impl IsA<gtk::Widget>) -> gtk::Box {
+pub(super) fn modal_layer(content: &impl IsA<gtk::Widget>) -> gtk::Box {
     let layer = gtk::Box::new(gtk::Orientation::Vertical, 0);
     layer.add_css_class("app-modal-layer");
     layer.add_css_class("modal-backdrop");
@@ -5125,7 +5125,11 @@ fn modal_layer(content: &impl IsA<gtk::Widget>) -> gtk::Box {
     layer
 }
 
-fn dismiss_modal_layer(layer: &gtk::Box, overlay: &gtk::Overlay, root: Option<&BlurBin>) {
+pub(super) fn dismiss_modal_layer(
+    layer: &gtk::Box,
+    overlay: &gtk::Overlay,
+    root: Option<&BlurBin>,
+) {
     overlay.remove_overlay(layer);
     if let Some(root) = root {
         root.set_blurred(false);

@@ -252,16 +252,27 @@ pub fn present_location(application: &gtk::Application, location: Option<PathBuf
     window.add_action(&search_action);
     application.set_accels_for_action("win.search", &["<Control>k"]);
 
-    let update_link = sidebar.update_notice.clone();
+    let update_button = sidebar.update_notice.clone();
     let update_area = sidebar.update_area.clone();
     let update_label = sidebar.update_label.clone();
+    let available_update = Rc::new(RefCell::new(None::<(String, String)>));
+    let available_for_click = available_update.clone();
+    let update_parent = window.clone().upcast::<gtk::Window>();
+    update_button.connect_clicked(move |_| {
+        let Some((version, download_url)) = available_for_click.borrow().clone() else {
+            return;
+        };
+        super::settings::show_update_dialog(&update_parent, &version, download_url);
+    });
+    let available_for_notice = available_update.clone();
     let update_notice: super::settings::UpdateNoticeHandler = Rc::new(move |release| {
-        if let Some((version, url)) = release {
-            update_link.set_uri(&url);
-            update_link.set_tooltip_text(Some(&format!("Open the v{version} release page")));
+        if let Some((version, _url, download_url)) = release {
+            update_button.set_tooltip_text(Some(&format!("Install Strata v{version}")));
             update_label.set_text(&format!("v{version} available"));
+            *available_for_notice.borrow_mut() = Some((version, download_url));
             update_area.set_visible(true);
         } else {
+            available_for_notice.borrow_mut().take();
             update_area.set_visible(false);
         }
     });
@@ -749,7 +760,7 @@ struct SidebarState {
 struct SidebarView {
     widget: gtk::Widget,
     state: Rc<SidebarState>,
-    update_notice: gtk::LinkButton,
+    update_notice: gtk::Button,
     update_area: gtk::Box,
     update_label: gtk::Label,
     handlers: RefCell<Vec<glib::SignalHandlerId>>,
@@ -1309,10 +1320,7 @@ fn build_sidebar(view: BrowserView) -> SidebarView {
         crate::assets::icons::DOWNLOADS,
         17,
     ));
-    let update_notice = gtk::LinkButton::builder()
-        .uri("")
-        .child(&update_content)
-        .build();
+    let update_notice = gtk::Button::builder().child(&update_content).build();
     update_notice.add_css_class("sidebar-update");
     let update_separator = gtk::Separator::new(gtk::Orientation::Horizontal);
     update_separator.add_css_class("sidebar-separator");

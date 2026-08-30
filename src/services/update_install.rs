@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use std::{
-    fs, io,
+    fs,
+    io::{Read, Write},
     path::{Path, PathBuf},
     process::Command,
-    sync::mpsc::{self, Receiver},
+    sync::mpsc::{self, Receiver, Sender},
     time::Duration,
 };
 
@@ -12,6 +13,8 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum UpdateInstall {
+    Downloading { downloaded: u64, total: Option<u64> },
+    Installing,
     Installed,
     Failed(String),
 }
@@ -25,7 +28,7 @@ pub fn install_update(download_url: String) -> Receiver<UpdateInstall> {
     let spawned = std::thread::Builder::new()
         .name("strata-update-install".into())
         .spawn(move || {
-            let outcome = match perform_install(&download_url) {
+            let outcome = match perform_install(&download_url, &sender) {
                 Ok(()) => UpdateInstall::Installed,
                 Err(message) => UpdateInstall::Failed(message),
             };
@@ -35,7 +38,7 @@ pub fn install_update(download_url: String) -> Receiver<UpdateInstall> {
     receiver
 }
 
-fn perform_install(download_url: &str) -> Result<(), String> {
+fn perform_install(download_url: &str, progress: &Sender<UpdateInstall>) -> Result<(), String> {
     let current_exe = std::env::current_exe().map_err(|error| error.to_string())?;
     let exe_dir = current_exe
         .parent()
@@ -47,7 +50,7 @@ fn perform_install(download_url: &str) -> Result<(), String> {
         let _ = fs::remove_dir_all(&workdir);
     };
 
-    let result = try_install(download_url, &workdir, exe_dir, &current_exe);
+    let result = try_install(download_url, &workdir, exe_dir, &current_exe, progress);
     cleanup();
     result
 }
@@ -57,9 +60,11 @@ fn try_install(
     workdir: &Path,
     exe_dir: &Path,
     current_exe: &Path,
+    progress: &Sender<UpdateInstall>,
 ) -> Result<(), String> {
     let archive_path = workdir.join("strata.tar.gz");
-    download_to_file(download_url, &archive_path)?;
+    download_to_file(download_url, &archive_path, progress)?;
+    let _sent = progress.send(UpdateInstall::Installing);
     verify_checksum(download_url, &archive_path)?;
 
     let extract_dir = workdir.join("extracted");
@@ -81,7 +86,11 @@ fn try_install(
     Ok(())
 }
 
-fn download_to_file(url: &str, destination: &Path) -> Result<(), String> {
+fn download_to_file(
+    url: &str,
+    destination: &Path,
+    progress: &Sender<UpdateInstall>,
+) -> Result<(), String> {
     let config = ureq::Agent::config_builder()
         .timeout_global(Some(REQUEST_TIMEOUT))
         .build();
@@ -91,10 +100,29 @@ fn download_to_file(url: &str, destination: &Path) -> Result<(), String> {
         .header("User-Agent", "strata-file-manager")
         .call()
         .map_err(|error| format!("Could not download the update: {error}"))?;
+    let total = response
+        .headers()
+        .get("content-length")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse().ok());
+    let mut reader = response.body_mut().as_reader();
     let mut file = fs::File::create(destination)
         .map_err(|error| format!("Could not save the update: {error}"))?;
-    io::copy(&mut response.body_mut().as_reader(), &mut file)
-        .map_err(|error| format!("Could not save the update: {error}"))?;
+    let mut downloaded = 0_u64;
+    let mut buffer = [0_u8; 64 * 1024];
+    let _sent = progress.send(UpdateInstall::Downloading { downloaded, total });
+    loop {
+        let count = reader
+            .read(&mut buffer)
+            .map_err(|error| format!("Could not download the update: {error}"))?;
+        if count == 0 {
+            break;
+        }
+        file.write_all(&buffer[..count])
+            .map_err(|error| format!("Could not save the update: {error}"))?;
+        downloaded = downloaded.saturating_add(count as u64);
+        let _sent = progress.send(UpdateInstall::Downloading { downloaded, total });
+    }
     Ok(())
 }
 

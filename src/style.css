@@ -545,6 +545,91 @@ headerbar menubutton.header-action > button:focus-visible image {
   outline-color: @theme_accent;
 }
 
+.update-dialog {
+  color: @theme_text;
+  min-width: 500px;
+}
+
+.update-dialog-header {
+  border-bottom: 1px solid alpha(@theme_border, 0.28);
+  padding: 18px 20px;
+}
+
+.update-dialog-symbol {
+  background: alpha(@theme_accent, 0.12);
+  border: 1px solid alpha(@theme_accent, 0.32);
+  border-radius: 7px;
+  color: @theme_accent;
+  min-height: 40px;
+  min-width: 40px;
+}
+
+.update-dialog-title {
+  color: @theme_text;
+  font-size: 1.05em;
+  font-weight: 700;
+}
+
+.update-dialog-subtitle,
+.update-dialog-status {
+  color: @theme_dim_text;
+}
+
+.update-dialog-body {
+  background: alpha(@theme_bg, 0.3);
+  padding: 20px;
+}
+
+.update-dialog-progress trough {
+  background: alpha(@theme_bg, 0.72);
+  border: 1px solid alpha(@theme_border, 0.42);
+  border-radius: 5px;
+  min-height: 9px;
+}
+
+.update-dialog-progress progress {
+  background: @theme_accent;
+  border: none;
+  border-radius: 4px;
+  min-height: 9px;
+  min-width: 1px;
+}
+
+.update-dialog-progress.error progress {
+  background: @theme_danger;
+}
+
+.update-dialog-actions {
+  border-top: 1px solid alpha(@theme_border, 0.28);
+  padding: 12px 20px;
+}
+
+.update-dialog-action {
+  background: alpha(@theme_accent, 0.12);
+  border: 1px solid alpha(@theme_accent, 0.6);
+  border-radius: 5px;
+  box-shadow: none;
+  color: @theme_accent;
+  min-height: 30px;
+  padding: 4px 14px;
+}
+
+.update-dialog-action:hover {
+  background: alpha(@theme_accent, 0.22);
+  border-color: @theme_accent;
+  color: @theme_accent;
+}
+
+.update-dialog-action:active {
+  background: alpha(@theme_accent, 0.32);
+  color: @theme_accent;
+}
+
+.update-dialog-action:focus-visible {
+  outline: 2px solid alpha(@theme_accent, 0.5);
+  outline-offset: 1px;
+}
+
 .settings-dialog {
   background: @theme_surface;
   border: 1px solid alpha(@theme_accent, 0.22);
@@ -638,6 +723,29 @@ headerbar menubutton.header-action > button:focus-visible image {
 .settings-option-description link:hover,
 .settings-option-description link:active {
   color: @theme_accent;
+}
+
+.settings-update-progress {
+  margin-top: 7px;
+}
+
+.settings-update-progress trough {
+  background: alpha(@theme_bg, 0.72);
+  border: 1px solid alpha(@theme_border, 0.42);
+  border-radius: 4px;
+  min-height: 7px;
+}
+
+.settings-update-progress progress {
+  background: @theme_accent;
+  border: none;
+  border-radius: 3px;
+  min-height: 7px;
+  min-width: 1px;
+}
+
+.settings-update-progress.error progress {
+  background: @theme_danger;
 }
 
 .settings-update-check {
