@@ -71,6 +71,15 @@ impl PreviewDrawer {
         title.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
         title.set_hexpand(true);
         title.set_xalign(0.0);
+        let open = gtk::Button::builder()
+            .tooltip_text("Open in default application")
+            .valign(gtk::Align::Center)
+            .build();
+        open.set_child(Some(&crate::assets::primary_icon(
+            crate::assets::icons::EXTERNAL_LINK,
+            16,
+        )));
+        open.add_css_class("preview-header-action");
         let close = gtk::Button::builder()
             .tooltip_text("Close preview (Space)")
             .valign(gtk::Align::Center)
@@ -80,8 +89,10 @@ impl PreviewDrawer {
             16,
         )));
         close.add_css_class("preview-close");
+        close.add_css_class("preview-header-action");
         header.append(&icon);
         header.append(&title);
+        header.append(&open);
         header.append(&close);
         pane.append(&header);
 
@@ -128,6 +139,28 @@ impl PreviewDrawer {
             last_split_width: Cell::new(0),
             animating: Cell::new(false),
             animation_generation: Rc::new(Cell::new(0)),
+        });
+        let weak = Rc::downgrade(&state);
+        open.connect_clicked(move |_| {
+            let Some(state) = weak.upgrade() else {
+                return;
+            };
+            let location = state
+                .current
+                .borrow()
+                .as_ref()
+                .map(|entry| entry.location.clone());
+            if let Some(location) = location {
+                if let Some(stream) = state
+                    .media
+                    .borrow()
+                    .as_ref()
+                    .and_then(gtk::Video::media_stream)
+                {
+                    stream.set_playing(false);
+                }
+                super::browser::open_location(&location, &state.pane);
+            }
         });
         let weak = Rc::downgrade(&state);
         close.connect_clicked(move |_| {
@@ -380,27 +413,47 @@ impl PreviewState {
                     self.content.append(&notice);
                 }
             }
-            PreviewContent::Image => {
-                let file = file_for_entry(&preview.entry);
-                let picture = gtk::Picture::for_file(&file);
-                picture.add_css_class("preview-image");
-                picture.set_can_shrink(true);
-                picture.set_content_fit(gtk::ContentFit::Contain);
-                picture.set_hexpand(true);
-                picture.set_vexpand(true);
-                self.content.append(&picture);
+            PreviewContent::Rasterized { png } => {
+                let bytes = glib::Bytes::from_owned(png);
+                match gtk::gdk::Texture::from_bytes(&bytes) {
+                    Ok(texture) => {
+                        let picture = gtk::Picture::for_paintable(&texture);
+                        picture.add_css_class("preview-image");
+                        picture.set_can_shrink(true);
+                        picture.set_content_fit(gtk::ContentFit::Contain);
+                        picture.set_hexpand(true);
+                        picture.set_vexpand(true);
+                        self.content.append(&picture);
+                    }
+                    Err(error) => self.show_message("Preview unavailable", &error.to_string()),
+                }
             }
-            PreviewContent::Media => {
-                let file = file_for_entry(&preview.entry);
-                let video = gtk::Video::new();
+            PreviewContent::SandboxedMedia { data } => {
+                let bytes = glib::Bytes::from_owned(data);
+                let stream = gio::MemoryInputStream::from_bytes(&bytes);
+                let media = gtk::MediaFile::for_input_stream(&stream);
+                let video = gtk::Video::for_media_stream(Some(&media));
                 video.add_css_class("preview-media");
                 video.set_autoplay(false);
                 video.set_loop(false);
-                video.set_file(Some(&file));
                 video.set_hexpand(true);
                 video.set_vexpand(true);
                 self.media.replace(Some(video.clone()));
                 self.content.append(&video);
+                let notice = gtk::Label::new(Some(
+                    "Preview limited to the first 30 seconds. Open the file to play the full video.",
+                ));
+                notice.add_css_class("preview-note");
+                notice.set_justify(gtk::Justification::Center);
+                notice.set_wrap(true);
+                notice.set_xalign(0.5);
+                self.content.append(&notice);
+            }
+            PreviewContent::Image | PreviewContent::Media => {
+                self.show_message(
+                    "Preview unavailable",
+                    "The sandboxed renderer returned no preview",
+                );
             }
             PreviewContent::Pdf { png, page, pages } => {
                 self.render_pdf_viewer(preview.entry, png, page, pages);
@@ -681,11 +734,10 @@ impl PreviewState {
     }
 
     fn clear_content(&self) {
-        if let Some(video) = self.media.borrow_mut().take() {
-            if let Some(stream) = video.media_stream() {
-                stream.set_playing(false);
-            }
-            video.set_file(gio::File::NONE);
+        if let Some(video) = self.media.borrow_mut().take()
+            && let Some(stream) = video.media_stream()
+        {
+            stream.set_playing(false);
         }
         clear_box(&self.content);
     }
@@ -822,14 +874,6 @@ fn clear_box(box_: &gtk::Box) {
     while let Some(child) = box_.first_child() {
         box_.remove(&child);
     }
-}
-
-fn file_for_entry(entry: &FileEntry) -> gio::File {
-    entry
-        .location
-        .native_path()
-        .map(gio::File::for_path)
-        .unwrap_or_else(|| gio::File::for_uri(entry.location.uri_value().unwrap_or_default()))
 }
 
 fn metadata_size(entry: &FileEntry) -> String {

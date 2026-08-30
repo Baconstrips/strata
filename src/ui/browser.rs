@@ -5235,7 +5235,7 @@ fn properties_action(icon: &str, label: &str) -> gtk::Button {
     button
 }
 
-fn open_location(location: &Location, parent: &impl IsA<gtk::Widget>) {
+pub(super) fn open_location(location: &Location, parent: &impl IsA<gtk::Widget>) {
     let file = gio_file_for_location(location);
     let uri = file.uri();
     if let Err(error) = gio::AppInfo::launch_default_for_uri(&uri, None::<&gio::AppLaunchContext>) {

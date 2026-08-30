@@ -1,5 +1,12 @@
 # Agent Instructions
 
+## Git workflow
+
+- Never commit or push directly to `main`. Work from a GitHub issue and submit changes through a pull request.
+- Name branches `<type>/<issue-number>-<short-kebab-description>`, for example `feat/6-sandbox-previews`. Use Conventional Commit types such as `feat`, `fix`, `docs`, `refactor`, `test`, `perf`, `build`, `ci`, and `chore`.
+- Write commits and pull request titles in Conventional Commits format: `<type>(optional-scope): <imperative description>`.
+- Keep commits focused. Use `!` and a `BREAKING CHANGE:` footer for breaking changes, and reference the issue in the pull request body.
+
 ## Test organization
 
 - Do not place test implementations inline with production code.
