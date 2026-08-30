@@ -3,16 +3,19 @@
 use std::{
     cell::{Cell, RefCell},
     fs, io,
-    path::PathBuf,
+    path::{Path, PathBuf},
     rc::Rc,
+    time::Duration,
 };
 
 use gtk::{gdk, gio, glib, prelude::*};
 use serde::{Deserialize, Serialize};
+use sourceview5::prelude::BufferExt as _;
 
 thread_local! {
     static SHARED_MANAGER: RefCell<std::rc::Weak<ThemeManager>> = const { RefCell::new(std::rc::Weak::new()) };
     static SOURCE_STYLE_PATH_INSTALLED: Cell<bool> = const { Cell::new(false) };
+    static SOURCE_BUFFERS: RefCell<Vec<glib::WeakRef<sourceview5::Buffer>>> = const { RefCell::new(Vec::new()) };
 }
 
 const BUILTIN_THEMES: [(&str, &str); 6] = [
@@ -92,6 +95,7 @@ pub struct ThemeManager {
     preferences: RefCell<Preferences>,
     omarchy_available: bool,
     omarchy_monitor: RefCell<Option<gio::FileMonitor>>,
+    pending_omarchy_refresh: RefCell<Option<glib::SourceId>>,
     previewing: Cell<bool>,
 }
 
@@ -127,6 +131,7 @@ impl ThemeManager {
             preferences: RefCell::new(preferences),
             omarchy_available,
             omarchy_monitor: RefCell::new(None),
+            pending_omarchy_refresh: RefCell::new(None),
             previewing: Cell::new(false),
         });
         manager.install_provider();
@@ -311,16 +316,41 @@ impl ThemeManager {
             return;
         };
         let weak = Rc::downgrade(self);
-        monitor.connect_changed(move |_, _, _, _| {
-            if let Some(manager) = weak.upgrade()
-                && manager.follows_omarchy()
-                && !manager.previewing.get()
+        monitor.connect_changed(move |_, file, other_file, _| {
+            if !is_omarchy_theme_event(file)
+                && !other_file
+                    .as_ref()
+                    .is_some_and(|file| is_omarchy_theme_event(file))
             {
-                manager.apply_selected();
+                return;
             }
+            let Some(manager) = weak.upgrade() else {
+                return;
+            };
+            if let Some(pending) = manager.pending_omarchy_refresh.borrow_mut().take() {
+                pending.remove();
+            }
+            let weak = weak.clone();
+            let refresh = glib::timeout_add_local_once(Duration::from_millis(75), move || {
+                let Some(manager) = weak.upgrade() else {
+                    return;
+                };
+                manager.pending_omarchy_refresh.borrow_mut().take();
+                if manager.follows_omarchy() && !manager.previewing.get() {
+                    manager.apply_selected();
+                }
+            });
+            manager.pending_omarchy_refresh.replace(Some(refresh));
         });
         self.omarchy_monitor.replace(Some(monitor));
     }
+}
+
+fn is_omarchy_theme_event(file: &gio::File) -> bool {
+    file.path()
+        .as_deref()
+        .and_then(Path::file_name)
+        .is_some_and(|name| name == "theme" || name == "theme.name")
 }
 
 fn builtins() -> Vec<Theme> {
@@ -443,8 +473,19 @@ fn validate_tokens(tokens: &ThemeTokens) -> Result<(), &'static str> {
     Ok(())
 }
 
-pub(super) fn source_style_scheme() -> Option<sourceview5::StyleScheme> {
+fn source_style_scheme() -> Option<sourceview5::StyleScheme> {
     sourceview5::StyleSchemeManager::default().scheme("strata-current")
+}
+
+pub(super) fn register_source_buffer(buffer: &sourceview5::Buffer) {
+    buffer.set_style_scheme(source_style_scheme().as_ref());
+    SOURCE_BUFFERS.with(|buffers| {
+        let mut buffers = buffers.borrow_mut();
+        buffers.retain(|buffer| buffer.upgrade().is_some());
+        let weak = glib::WeakRef::new();
+        weak.set(Some(buffer));
+        buffers.push(weak);
+    });
 }
 
 fn install_source_style_scheme(tokens: &ThemeTokens) {
@@ -466,6 +507,16 @@ fn install_source_style_scheme(tokens: &ThemeTokens) {
         }
     });
     manager.force_rescan();
+    let scheme = manager.scheme("strata-current");
+    SOURCE_BUFFERS.with(|buffers| {
+        buffers.borrow_mut().retain(|buffer| {
+            let Some(buffer) = buffer.upgrade() else {
+                return false;
+            };
+            buffer.set_style_scheme(scheme.as_ref());
+            true
+        });
+    });
 }
 
 fn source_style_scheme_xml(tokens: &ThemeTokens) -> String {

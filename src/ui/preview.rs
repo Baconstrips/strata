@@ -346,7 +346,7 @@ impl PreviewState {
                     Some(&preview.content_type),
                 );
                 buffer.set_language(language.as_ref());
-                buffer.set_style_scheme(super::theme::source_style_scheme().as_ref());
+                super::theme::register_source_buffer(&buffer);
                 buffer.set_highlight_syntax(true);
                 buffer.set_text(&content);
                 let view = sourceview5::View::builder()

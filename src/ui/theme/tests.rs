@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use super::{Preferences, blend, slugify, title_case_slug, tokens_from_quattro};
+use super::{
+    Preferences, blend, is_omarchy_theme_event, slugify, title_case_slug, tokens_from_quattro,
+};
 
 #[test]
 fn names_become_safe_config_file_slugs() {
@@ -41,6 +43,22 @@ color8 = "#123247"
 #[test]
 fn legacy_palette_without_quattro_semantics_is_not_detected() {
     assert!(tokens_from_quattro("legacy", "color4 = \"#00aaff\"").is_none());
+}
+
+#[test]
+fn omarchy_monitor_ignores_unrelated_state_changes() {
+    assert!(is_omarchy_theme_event(&gtk::gio::File::for_path(
+        "/state/current/theme"
+    )));
+    assert!(is_omarchy_theme_event(&gtk::gio::File::for_path(
+        "/state/current/theme.name"
+    )));
+    assert!(!is_omarchy_theme_event(&gtk::gio::File::for_path(
+        "/state/current/next-theme"
+    )));
+    assert!(!is_omarchy_theme_event(&gtk::gio::File::for_path(
+        "/state/current/background"
+    )));
 }
 
 #[test]
