@@ -103,6 +103,16 @@ Run the standard quality checks:
 
 The script always runs formatting, compilation, Clippy, and tests. It also runs dependency-policy and spelling checks when `cargo-deny` and `typos` are installed. CI runs the complete suite on the latest stable Rust release.
 
+## Creating a release
+
+Maintainers can run the **Release** workflow from GitHub's Actions tab on the default branch and choose a `patch`, `minor`, or `major` version bump. After both Linux targets build successfully, the workflow:
+
+- commits the new version to `Cargo.toml` and `Cargo.lock`;
+- creates an annotated `vX.Y.Z` tag; and
+- publishes x86-64 and ARM64 archives, SHA-256 checksum files, and generated release notes.
+
+The release workflow stops without publishing if the default branch changes while binaries are building. Run it again from the new head in that case.
+
 ## Bundled assets
 
 Strata includes a curated Lucide icon subset and the regular JetBrains Mono variable font. See [third-party notices](THIRD_PARTY_LICENSES.md) for versions, modifications, and complete attribution.

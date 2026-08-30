@@ -1,0 +1,238 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Version component to increment
+        required: true
+        default: patch
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    name: Determine release version
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      source_sha: ${{ steps.source.outputs.sha }}
+
+    steps:
+      - name: Require the default branch
+        env:
+          BRANCH: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          if [[ "$BRANCH" != "$DEFAULT_BRANCH" ]]; then
+            echo "Releases must be run from $DEFAULT_BRANCH (selected: $BRANCH)." >&2
+            exit 1
+          fi
+
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Record source commit
+        id: source
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Calculate version
+        id: version
+        env:
+          BUMP: ${{ inputs.bump }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import pathlib
+          import re
+
+          manifest = pathlib.Path("Cargo.toml").read_text()
+          match = re.search(r'^version = "(\d+)\.(\d+)\.(\d+)"$', manifest, re.MULTILINE)
+          if match is None:
+              raise SystemExit("Cargo.toml must contain a plain major.minor.patch package version")
+
+          major, minor, patch = map(int, match.groups())
+          bump = os.environ["BUMP"]
+          if bump == "major":
+              major, minor, patch = major + 1, 0, 0
+          elif bump == "minor":
+              minor, patch = minor + 1, 0
+          elif bump == "patch":
+              patch += 1
+          else:
+              raise SystemExit(f"unsupported version bump: {bump}")
+
+          version = f"{major}.{minor}.{patch}"
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write(f"version={version}\n")
+          PY
+
+  build:
+    name: Build ${{ matrix.target }}
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-24.04
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - name: Check out source commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.source_sha }}
+
+      - name: Set release version
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import pathlib
+          import re
+
+          version = os.environ["VERSION"]
+          manifest_path = pathlib.Path("Cargo.toml")
+          manifest = manifest_path.read_text()
+          manifest, count = re.subn(
+              r'(^version = ")\d+\.\d+\.\d+("$)',
+              rf'\g<1>{version}\2',
+              manifest,
+              count=1,
+              flags=re.MULTILINE,
+          )
+          if count != 1:
+              raise SystemExit("could not update Cargo.toml package version")
+          manifest_path.write_text(manifest)
+
+          lock_path = pathlib.Path("Cargo.lock")
+          lock = lock_path.read_text()
+          lock, count = re.subn(
+              r'(\[\[package\]\]\nname = "strata"\nversion = ")\d+\.\d+\.\d+("\n)',
+              rf'\g<1>{version}\2',
+              lock,
+              count=1,
+          )
+          if count != 1:
+              raise SystemExit("could not update the strata version in Cargo.lock")
+          lock_path.write_text(lock)
+          PY
+
+      - name: Install native development libraries
+        run: >-
+          sudo apt-get update &&
+          sudo apt-get install --yes libfontconfig1-dev libgtk-4-dev libgtksourceview-5-dev libpoppler-glib-dev
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+
+      - name: Build release binary
+        run: cargo build --release --locked --target "${{ matrix.target }}"
+
+      - name: Package binary
+        env:
+          TARGET: ${{ matrix.target }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          package="strata-${VERSION}-${TARGET}"
+          mkdir -p "dist/$package"
+          install -m 755 "target/$TARGET/release/strata" "dist/$package/strata"
+          cp README.md LICENSE THIRD_PARTY_LICENSES.md "dist/$package/"
+          tar -C dist -czf "dist/$package.tar.gz" "$package"
+          (cd dist && sha256sum "$package.tar.gz" > "$package.tar.gz.sha256")
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: strata-${{ matrix.target }}
+          path: |
+            dist/*.tar.gz
+            dist/*.sha256
+          if-no-files-found: error
+
+  release:
+    name: Tag and publish release
+    needs: [prepare, build]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check out source commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.source_sha }}
+          fetch-depth: 0
+
+      - name: Download binaries
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Commit version and push tag
+        env:
+          BRANCH: ${{ github.event.repository.default_branch }}
+          SOURCE_SHA: ${{ needs.prepare.outputs.source_sha }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          git fetch origin "$BRANCH" --tags
+          if [[ "$(git rev-parse "origin/$BRANCH")" != "$SOURCE_SHA" ]]; then
+            echo "The default branch changed while release binaries were building. Run the workflow again." >&2
+            exit 1
+          fi
+          if git rev-parse "v$VERSION" >/dev/null 2>&1; then
+            echo "Tag v$VERSION already exists." >&2
+            exit 1
+          fi
+
+          python3 - <<'PY'
+          import os
+          import pathlib
+          import re
+
+          version = os.environ["VERSION"]
+          for filename, pattern in (
+              ("Cargo.toml", r'(^version = ")\d+\.\d+\.\d+("$)'),
+              ("Cargo.lock", r'(\[\[package\]\]\nname = "strata"\nversion = ")\d+\.\d+\.\d+("\n)'),
+          ):
+              path = pathlib.Path(filename)
+              text, count = re.subn(pattern, rf'\g<1>{version}\2', path.read_text(), count=1, flags=re.MULTILINE)
+              if count != 1:
+                  raise SystemExit(f"could not update version in {filename}")
+              path.write_text(text)
+          PY
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Cargo.toml Cargo.lock
+          git commit -m "chore: release v$VERSION"
+          git tag -a "v$VERSION" -m "Strata v$VERSION"
+          git push --atomic origin "HEAD:$BRANCH" "v$VERSION"
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: gh release create "v$VERSION" dist/* --verify-tag --generate-notes --title "Strata v$VERSION"
